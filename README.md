@@ -56,7 +56,7 @@ uv run python src/main.py --live --filter disney
 
 ```python
 import asyncio
-from themeparks_client import ThemeparksClient
+from extractors.themeparks_client import ThemeparksClient
 
 async def main():
     async with ThemeparksClient() as client:
@@ -75,8 +75,9 @@ asyncio.run(main())
 ```
 themeparks-data-engineering/
 ├── src/
-│   ├── themeparks_client.py    # Async API client
 │   ├── main.py                 # CLI entry point
+│   ├── extractors/
+│   │   └── themeparks_client.py  # Async API client
 │   ├── pipelines/
 │   │   ├── base.py             # Abstract base pipeline
 │   │   ├── destinations.py     # Destinations pipeline
