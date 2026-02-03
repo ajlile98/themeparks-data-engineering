@@ -15,6 +15,8 @@ To use:
 Note: This is a template - adjust paths and schedules for your environment.
 """
 
+# git sync bump
+
 import os
 from datetime import datetime, timedelta
 from airflow import DAG
