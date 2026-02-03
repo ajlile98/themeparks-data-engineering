@@ -52,52 +52,49 @@ PARK_FILTER = "disney"
 
 def run_destinations_pipeline():
     """Task: Extract destination/park metadata."""
-    import os
-    from pathlib import Path
     from pipelines import DestinationsPipeline
-    from loaders import CsvLoader
+    from loaders import KafkaLoader
     
-    data_dir = os.environ.get(
-        "THEMEPARKS_DATA_DIR",
-        "/mnt/d/Users/Andrew/Documents/GitHub/themeparks-data-engineering/data"
-    )
-    target = CsvLoader(str(Path(data_dir) / "bronze/destinations/destinations.csv"))
-    pipeline = DestinationsPipeline(target)
+    targets = [
+        KafkaLoader(
+            hostname=os.environ.get("KAFKA_HOST", "localhost"),
+            port=int(os.environ.get("KAFKA_PORT", "9092")),
+            topic="themeparks.destinations"
+        )
+    ]
+    pipeline = DestinationsPipeline(targets)
     pipeline.run()
 
 
 def run_entities_pipeline(park_filter: str | None = None):
     """Task: Extract entity metadata."""
-    import os
-    from pathlib import Path
     from pipelines import EntityPipeline
-    from loaders import CsvLoader
+    from loaders import KafkaLoader
     
-    data_dir = os.environ.get(
-        "THEMEPARKS_DATA_DIR",
-        "/mnt/d/Users/Andrew/Documents/GitHub/themeparks-data-engineering/data"
-    )
-    target = CsvLoader(str(Path(data_dir) / "bronze/entities/entities.csv"))
-    pipeline = EntityPipeline(target, park_filter=park_filter)
+    targets = [
+        KafkaLoader(
+            hostname=os.environ.get("KAFKA_HOST", "localhost"),
+            port=int(os.environ.get("KAFKA_PORT", "9092")),
+            topic="themeparks.entities"
+        )
+    ]
+    pipeline = EntityPipeline(targets, park_filter=park_filter)
     pipeline.run()
 
 
 def run_live_data_pipeline(park_filter: str | None = None):
     """Task: Extract live wait times."""
-    import os
-    from pathlib import Path
     from pipelines import LiveDataPipeline
-    from loaders import ParquetLoader
+    from loaders import KafkaLoader
     
-    data_dir = os.environ.get(
-        "THEMEPARKS_DATA_DIR",
-        "/mnt/d/Users/Andrew/Documents/GitHub/themeparks-data-engineering/data"
-    )
-    target = ParquetLoader(
-        str(Path(data_dir) / "bronze/live/live_data.parquet"),
-        partition_cols=["lastUpdatedDate", "park_name"]
-    )
-    pipeline = LiveDataPipeline(target, park_filter=park_filter)
+    targets = [
+        KafkaLoader(
+            hostname=os.environ.get("KAFKA_HOST", "localhost"),
+            port=int(os.environ.get("KAFKA_PORT", "9092")),
+            topic="themeparks.live_data"
+        )
+    ]
+    pipeline = LiveDataPipeline(targets, park_filter=park_filter)
     pipeline.run()
 
 
