@@ -249,7 +249,7 @@ wheels = [
 [[package]]
 name = "themeparks-data-engineering"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "kafka-python" },
@@ -266,6 +266,9 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=23.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
 ]
+
+[package.metadata.requires-dev]
+dev = []
 
 [[package]]
 name = "tzdata"

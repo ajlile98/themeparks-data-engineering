@@ -16,7 +16,10 @@ Usage:
 
 import httpx
 import asyncio
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ThemeparksClient:
@@ -109,27 +112,38 @@ class ThemeparksClient:
         Returns:
             Dict mapping park_id -> live_data (or error info)
         """
+        logger.debug(f"Fetching live data for {len(park_ids)} parks in parallel")
         tasks = [self.get_entity_live(park_id) for park_id in park_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         output = {}
+        errors = 0
         for park_id, result in zip(park_ids, results):
             if isinstance(result, Exception):
+                logger.error(f"Failed to fetch park {park_id}: {result}")
                 output[park_id] = {"error": str(result), "success": False}
+                errors += 1
             else:
                 result["success"] = True
                 output[park_id] = result
+        
+        if errors > 0:
+            logger.warning(f"Failed to fetch {errors}/{len(park_ids)} parks")
+        else:
+            logger.debug(f"Successfully fetched all {len(park_ids)} parks")
         
         return output
     
     async def get_all_park_ids(self) -> list[str]:
         """Fetch all park IDs from all destinations."""
+        logger.debug("Fetching all park IDs from destinations")
         destinations = await self.get_destinations()
         park_ids = []
         for dest in destinations.get("destinations", []):
             for park in dest.get("parks", []):
                 if park_id := park.get("id"):
                     park_ids.append(park_id)
+        logger.info(f"Found {len(park_ids)} total parks across all destinations")
         return park_ids
 
 
@@ -157,7 +171,7 @@ async def fetch_all_parks_live() -> dict[str, dict]:
     """
     async with ThemeparksClient() as client:
         park_ids = await client.get_all_park_ids()
-        print(f"Fetching live data for {len(park_ids)} parks...")
+        logger.info(f"Fetching live data for {len(park_ids)} parks...")
         return await client.get_multiple_parks_live(park_ids)
 
 

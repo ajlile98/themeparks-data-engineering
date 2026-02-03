@@ -6,9 +6,12 @@ Run frequency: Daily (entity details change occasionally)
 """
 
 import asyncio
+import logging
 import pandas as pd
 from pipelines.base import BasePipeline
 from extractors.themeparks_client import ThemeparksClient
+
+logger = logging.getLogger(__name__)
 
 
 class EntityPipeline(BasePipeline):
@@ -60,7 +63,7 @@ class EntityPipeline(BasePipeline):
             park_ids = [p["park_id"] for p in parks if p["park_id"]]
             park_info = {p["park_id"]: p for p in parks}
             
-            print(f"[{self.name}] Fetching entities for {len(park_ids)} parks...")
+            logger.info(f"Fetching entities for {len(park_ids)} parks...")
             
             # Fetch children (entities) for all parks in parallel
             tasks = [client.get_entity_children(pid) for pid in park_ids]
@@ -70,7 +73,7 @@ class EntityPipeline(BasePipeline):
             all_entities = []
             for park_id, result in zip(park_ids, results):
                 if isinstance(result, Exception):
-                    print(f"[{self.name}] Error fetching {park_id}: {result}")
+                    logger.error(f"Error fetching {park_id}: {result}")
                     continue
                 
                 info = park_info.get(park_id, {})
@@ -80,7 +83,7 @@ class EntityPipeline(BasePipeline):
                     entity["destination_name"] = info.get("destination_name")
                     all_entities.append(entity)
                 
-                print(f"[{self.name}]   {info.get('park_name', park_id)}: {len(result.get('children', []))} entities")
+                logger.debug(f"  {info.get('park_name', park_id)}: {len(result.get('children', []))} entities")
             
             return pd.DataFrame.from_records(all_entities)
     

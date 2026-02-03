@@ -7,11 +7,14 @@ for extract, transform, load operations.
 
 from abc import ABC, abstractmethod
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import List
 import pandas as pd
 
 from loaders import Loader
+
+logger = logging.getLogger(__name__)
 
 
 class BasePipeline(ABC):
@@ -97,25 +100,28 @@ class BasePipeline(ABC):
         """
         self._run_timestamp = datetime.now(timezone.utc)
         
-        print(f"[{self.name}] Starting pipeline...")
+        logger.info(f"[{self.name}] Starting pipeline at {self._run_timestamp.isoformat()}")
         
         # Extract
+        logger.info(f"[{self.name}] Extracting data...")
         df = asyncio.run(self.extract())
-        print(f"[{self.name}] Extracted {len(df)} records")
+        logger.info(f"[{self.name}] Extracted {len(df)} records")
         
         if df.empty:
-            print(f"[{self.name}] No data extracted, skipping transform/load")
+            logger.warning(f"[{self.name}] No data extracted, skipping transform/load")
             return df
         
         # Transform
+        logger.info(f"[{self.name}] Transforming data...")
         df = self.transform(df)
-        print(f"[{self.name}] Transformed {len(df)} records")
+        logger.info(f"[{self.name}] Transformed {len(df)} records")
         
         # Load
+        logger.info(f"[{self.name}] Loading data to {len(self.targets)} target(s)...")
         self.load(df)
-        print(f"[{self.name}] Loaded to {self.targets}")
+        logger.info(f"[{self.name}] Loaded to {self.targets}")
         
-        print(f"[{self.name}] Complete")
+        logger.info(f"[{self.name}] Pipeline complete")
         return df
     
     async def run_async(self) -> pd.DataFrame:
@@ -127,20 +133,23 @@ class BasePipeline(ABC):
         """
         self._run_timestamp = datetime.now(timezone.utc)
         
-        print(f"[{self.name}] Starting pipeline...")
+        logger.info(f"[{self.name}] Starting pipeline at {self._run_timestamp.isoformat()}")
         
+        logger.info(f"[{self.name}] Extracting data...")
         df = await self.extract()
-        print(f"[{self.name}] Extracted {len(df)} records")
+        logger.info(f"[{self.name}] Extracted {len(df)} records")
         
         if df.empty:
-            print(f"[{self.name}] No data extracted, skipping transform/load")
+            logger.warning(f"[{self.name}] No data extracted, skipping transform/load")
             return df
         
+        logger.info(f"[{self.name}] Transforming data...")
         df = self.transform(df)
-        print(f"[{self.name}] Transformed {len(df)} records")
+        logger.info(f"[{self.name}] Transformed {len(df)} records")
         
+        logger.info(f"[{self.name}] Loading data to {len(self.targets)} target(s)...")
         self.load(df)
-        print(f"[{self.name}] Loaded to {self.target}")
+        logger.info(f"[{self.name}] Loaded to {self.targets}")
         
-        print(f"[{self.name}] Complete")
+        logger.info(f"[{self.name}] Pipeline complete")
         return df

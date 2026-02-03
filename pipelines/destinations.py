@@ -5,9 +5,12 @@ Extracts theme park destinations (resorts) and their associated parks.
 Run frequency: Weekly (data rarely changes)
 """
 
+import logging
 import pandas as pd
 from pipelines.base import BasePipeline
 from extractors.themeparks_client import ThemeparksClient
+
+logger = logging.getLogger(__name__)
 
 
 class DestinationsPipeline(BasePipeline):
@@ -26,7 +29,7 @@ class DestinationsPipeline(BasePipeline):
             data = await client.get_destinations()
             destinations = data.get("destinations", [])
             
-            print(f"[{self.name}] Found {len(destinations)} destinations")
+            logger.info(f"Found {len(destinations)} destinations")
             
             # Flatten: one row per park (with destination info)
             records = []

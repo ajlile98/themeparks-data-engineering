@@ -13,10 +13,20 @@ Usage:
 """
 
 import argparse
+import logging
 from pathlib import Path
 
 from pipelines import DestinationsPipeline, EntityPipeline, LiveDataPipeline
 from loaders import CsvLoader, KafkaLoader, ParquetLoader
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+logger = logging.getLogger(__name__)
 
 
 # Data directory structure
@@ -29,6 +39,7 @@ def ensure_directories():
     (BRONZE_DIR / "destinations").mkdir(parents=True, exist_ok=True)
     (BRONZE_DIR / "entities").mkdir(parents=True, exist_ok=True)
     (BRONZE_DIR / "live").mkdir(parents=True, exist_ok=True)
+    logger.debug(f"Ensured data directories exist at {BRONZE_DIR}")
 
 
 def run_destinations():
@@ -64,36 +75,31 @@ def run_live_data(park_filter: str | None = None):
 
 def run_all(park_filter: str | None = None):
     """Run all pipelines."""
-    print("=" * 60)
-    print("THEME PARKS DATA PIPELINE - Full Run")
-    print("=" * 60)
+    logger.info("="*60)
+    logger.info("THEME PARKS DATA PIPELINE - Full Run")
+    logger.info("="*60)
     
     run_destinations()
-    print()
     run_entities(park_filter)
-    print()
     run_live_data(park_filter)
     
-    print()
-    print("=" * 60)
-    print("All pipelines complete!")
-    print("=" * 60)
+    logger.info("="*60)
+    logger.info("All pipelines complete!")
+    logger.info("="*60)
 
 
 def run_static(park_filter: str | None = None):
     """Run static data pipelines only (destinations + entities)."""
-    print("=" * 60)
-    print("THEME PARKS DATA PIPELINE - Static Data")
-    print("=" * 60)
+    logger.info("="*60)
+    logger.info("THEME PARKS DATA PIPELINE - Static Data")
+    logger.info("="*60)
     
     run_destinations()
-    print()
     run_entities(park_filter)
     
-    print()
-    print("=" * 60)
-    print("Static pipelines complete!")
-    print("=" * 60)
+    logger.info("="*60)
+    logger.info("Static pipelines complete!")
+    logger.info("="*60)
 
 
 def main():

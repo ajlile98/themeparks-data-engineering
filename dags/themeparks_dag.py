@@ -26,12 +26,6 @@ from airflow.operators.empty import EmptyOperator
 # Configuration
 # -----------------------------------------------------------------------------
 
-# Data directory - set via environment variable or default to project path
-DATA_DIR = os.environ.get(
-    "THEMEPARKS_DATA_DIR",
-    "/mnt/d/Users/Andrew/Documents/GitHub/themeparks-data-engineering/data"
-)
-
 # Default args applied to all tasks
 default_args = {
     "owner": "data-engineering",

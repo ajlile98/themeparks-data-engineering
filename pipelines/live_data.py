@@ -5,9 +5,12 @@ Extracts real-time wait times, show times, and status for all attractions.
 Run frequency: Every 5 minutes (data changes constantly)
 """
 
+import logging
 import pandas as pd
 from pipelines.base import BasePipeline
 from extractors.themeparks_client import ThemeparksClient
+
+logger = logging.getLogger(__name__)
 
 
 class LiveDataPipeline(BasePipeline):
@@ -59,7 +62,7 @@ class LiveDataPipeline(BasePipeline):
             park_ids = [p["park_id"] for p in parks if p["park_id"]]
             park_info = {p["park_id"]: p for p in parks}
             
-            print(f"[{self.name}] Fetching live data for {len(park_ids)} parks...")
+            logger.info(f"Fetching live data for {len(park_ids)} parks...")
             
             # Fetch live data for all parks in parallel
             results = await client.get_multiple_parks_live(park_ids)
@@ -70,7 +73,7 @@ class LiveDataPipeline(BasePipeline):
                 info = park_info.get(park_id, {})
                 
                 if not result.get("success"):
-                    print(f"[{self.name}]   [ERROR] {info.get('park_name', park_id)}: {result.get('error')}")
+                    logger.error(f"  [ERROR] {info.get('park_name', park_id)}: {result.get('error')}")
                     continue
                 
                 live_items = result.get("liveData", [])
@@ -80,9 +83,9 @@ class LiveDataPipeline(BasePipeline):
                     item["destination_name"] = info.get("destination_name")
                     all_live_data.append(item)
                 
-                print(f"[{self.name}]   [OK] {info.get('park_name', park_id)}: {len(live_items)} items")
+                logger.debug(f"  [OK] {info.get('park_name', park_id)}: {len(live_items)} items")
             
-            print(f"[{self.name}] Total: {len(all_live_data)} items")
+            logger.info(f"Total: {len(all_live_data)} live data items collected")
             return pd.DataFrame.from_records(all_live_data)
     
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
