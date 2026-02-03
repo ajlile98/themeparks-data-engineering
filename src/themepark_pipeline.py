@@ -3,15 +3,15 @@
 
 import asyncio
 import httpx
-from loaders.load_target import LoadTarget
+from loaders.load_target import Loader
 from extractors.themeparks_client import ThemeparksClient
 import pandas as pd
 
 
 class ThemeParkPipeline:
 
-    def __init__(self, target: LoadTarget):
-        self.target: LoadTarget = target
+    def __init__(self, target: Loader):
+        self.target: Loader = target
 
     async def extract(self) -> pd.DataFrame:
         async with ThemeparksClient() as client:

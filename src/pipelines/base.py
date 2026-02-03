@@ -8,8 +8,10 @@ for extract, transform, load operations.
 from abc import ABC, abstractmethod
 import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import List
 import pandas as pd
+
+from loaders import Loader
 
 
 class BasePipeline(ABC):
@@ -25,14 +27,14 @@ class BasePipeline(ABC):
         - load(): Custom loading logic
     """
     
-    def __init__(self, target: Any):
+    def __init__(self, targets: List[Loader]):
         """
         Initialize pipeline with a load target.
         
         Args:
             target: Object with a load(data) method (e.g., CsvLoadTarget)
         """
-        self.target = target
+        self.targets = targets
         self._run_timestamp: datetime | None = None
     
     @property
@@ -78,12 +80,13 @@ class BasePipeline(ABC):
     
     def load(self, df: pd.DataFrame) -> None:
         """
-        Load data to target destination.
+        Load data to target destinations.
         
         Args:
             df: Transformed DataFrame to load
         """
-        self.target.load(df)
+        for target in self.targets:
+            target.load(df)
     
     def run(self) -> pd.DataFrame:
         """
@@ -110,7 +113,7 @@ class BasePipeline(ABC):
         
         # Load
         self.load(df)
-        print(f"[{self.name}] Loaded to {self.target}")
+        print(f"[{self.name}] Loaded to {self.targets}")
         
         print(f"[{self.name}] Complete")
         return df

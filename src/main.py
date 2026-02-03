@@ -16,7 +16,7 @@ import argparse
 from pathlib import Path
 
 from pipelines import DestinationsPipeline, EntityPipeline, LiveDataPipeline
-from loaders.load_target import CsvLoadTarget, ParquetLoadTarget
+from loaders import CsvLoader, KafkaLoader, ParquetLoader
 
 
 # Data directory structure
@@ -33,25 +33,32 @@ def ensure_directories():
 
 def run_destinations():
     """Run destinations pipeline (weekly)."""
-    target = CsvLoadTarget(str(BRONZE_DIR / "destinations" / "destinations.csv"))
-    pipeline = DestinationsPipeline(target)
+    targets = [CsvLoader(str(BRONZE_DIR / "destinations" / "destinations.csv"))]
+    pipeline = DestinationsPipeline(targets)
     return pipeline.run()
 
 
 def run_entities(park_filter: str | None = None):
     """Run entities pipeline (daily)."""
-    target = CsvLoadTarget(str(BRONZE_DIR / "entities" / "entities.csv"))
-    pipeline = EntityPipeline(target, park_filter=park_filter)
+    targets = [CsvLoader(str(BRONZE_DIR / "entities" / "entities.csv"))]
+    pipeline = EntityPipeline(targets, park_filter=park_filter)
     return pipeline.run()
 
 
 def run_live_data(park_filter: str | None = None):
     """Run live data pipeline (every 5 min)."""
-    target = ParquetLoadTarget(
-        str(BRONZE_DIR / "live" / "live_data.parquet"),
-        partition_cols=["lastUpdatedDate", "park_name"]
-    )
-    pipeline = LiveDataPipeline(target, park_filter=park_filter)
+    targets = [
+        ParquetLoader(
+            str(BRONZE_DIR / "live" / "live_data.parquet"),
+            partition_cols=["lastUpdatedDate", "park_name"]
+        ),
+        KafkaLoader(
+            "10.0.1.196",
+            9094,
+            "theme-park"
+        )
+    ]
+    pipeline = LiveDataPipeline(targets, park_filter=park_filter)
     return pipeline.run()
 
 

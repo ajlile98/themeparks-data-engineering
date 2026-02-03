@@ -55,13 +55,13 @@ def run_destinations_pipeline():
     import os
     from pathlib import Path
     from pipelines import DestinationsPipeline
-    from loaders.load_target import CsvLoadTarget
+    from loaders import CsvLoader
     
     data_dir = os.environ.get(
         "THEMEPARKS_DATA_DIR",
         "/mnt/d/Users/Andrew/Documents/GitHub/themeparks-data-engineering/data"
     )
-    target = CsvLoadTarget(str(Path(data_dir) / "bronze/destinations/destinations.csv"))
+    target = CsvLoader(str(Path(data_dir) / "bronze/destinations/destinations.csv"))
     pipeline = DestinationsPipeline(target)
     pipeline.run()
 
@@ -71,13 +71,13 @@ def run_entities_pipeline(park_filter: str | None = None):
     import os
     from pathlib import Path
     from pipelines import EntityPipeline
-    from loaders.load_target import CsvLoadTarget
+    from loaders import CsvLoader
     
     data_dir = os.environ.get(
         "THEMEPARKS_DATA_DIR",
         "/mnt/d/Users/Andrew/Documents/GitHub/themeparks-data-engineering/data"
     )
-    target = CsvLoadTarget(str(Path(data_dir) / "bronze/entities/entities.csv"))
+    target = CsvLoader(str(Path(data_dir) / "bronze/entities/entities.csv"))
     pipeline = EntityPipeline(target, park_filter=park_filter)
     pipeline.run()
 
@@ -87,13 +87,13 @@ def run_live_data_pipeline(park_filter: str | None = None):
     import os
     from pathlib import Path
     from pipelines import LiveDataPipeline
-    from loaders.load_target import ParquetLoadTarget
+    from loaders import ParquetLoader
     
     data_dir = os.environ.get(
         "THEMEPARKS_DATA_DIR",
         "/mnt/d/Users/Andrew/Documents/GitHub/themeparks-data-engineering/data"
     )
-    target = ParquetLoadTarget(
+    target = ParquetLoader(
         str(Path(data_dir) / "bronze/live/live_data.parquet"),
         partition_cols=["lastUpdatedDate", "park_name"]
     )

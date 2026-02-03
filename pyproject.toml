@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "httpx>=0.28.1",
+    "kafka-python>=2.3.0",
     "pandas>=3.0.0",
     "pyarrow>=23.0.0",
     "python-dotenv>=1.2.1",

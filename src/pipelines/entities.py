@@ -22,15 +22,15 @@ class EntityPipeline(BasePipeline):
     
     name = "entities"
     
-    def __init__(self, target, park_filter: str | None = None):
+    def __init__(self, targets, park_filter: str | None = None):
         """
         Initialize entity pipeline.
         
         Args:
-            target: Load target (CSV, Parquet, etc.)
+            targets: List of load targets (CSV, Parquet, etc.)
             park_filter: Optional filter string (e.g., 'disney' to only get Disney parks)
         """
-        super().__init__(target)
+        super().__init__(targets)
         self.park_filter = park_filter
     
     async def extract(self) -> pd.DataFrame:
