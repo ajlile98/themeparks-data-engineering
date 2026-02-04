@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
+README.new.md
+README.old.md
+
+# Tests
+tests/
+test_*.py
+*_test.py
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Data files (don't include in image)
+data/
+*.csv
+*.parquet
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Airflow
+logs/
+dags/__pycache__/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

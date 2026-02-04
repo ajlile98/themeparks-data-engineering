@@ -1,0 +1,79 @@
+# Docker Compose for Local Development and Testing
+
+version: '3.8'
+
+services:
+  # MinIO for intermediate data storage
+  minio:
+    image: minio/minio:latest
+    container_name: themeparks-minio
+    ports:
+      - "9000:9000"  # API
+      - "9001:9001"  # Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Kafka for data streaming
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: themeparks-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: themeparks-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  # Theme Parks Pipeline (for testing)
+  themeparks:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: themeparks:latest
+    container_name: themeparks-pipeline
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      - minio
+      - kafka
+    # Override to run specific commands
+    command: ["--help"]
+
+volumes:
+  minio-data:
+    driver: local
+
+networks:
+  default:
+    name: themeparks-network

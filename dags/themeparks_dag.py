@@ -54,7 +54,7 @@ def run_destinations_pipeline():
     targets = [
         KafkaLoader(
             hostname=os.environ.get("KAFKA_HOST", "localhost"),
-            port=int(os.environ.get("KAFKA_PORT", "9092")),
+            port=int(os.environ.get("KAFKA_PORT", "9094")),
             topic="themeparks.destinations"
         )
     ]
