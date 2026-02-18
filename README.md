@@ -1,155 +1,216 @@
 # Theme Parks Data Engineering
 
-A data engineering pipeline for collecting and analyzing theme park wait times from the [themeparks.wiki API](https://api.themeparks.wiki/docs). Built with Python, using async HTTP requests for parallel data fetching and Apache Airflow for orchestration.
+A real-time ETL pipeline for collecting and processing theme park data from the [ThemeParks.wiki API](https://api.themeparks.wiki/). This project uses Apache Airflow to orchestrate data collection for destinations, park entities, and live wait times across major theme parks worldwide.
 
 ## Overview
 
-This project implements a medallion architecture (Bronze/Silver/Gold) for ingesting theme park data:
+This data engineering pipeline collects three types of data from theme parks:
 
-- **Bronze Layer**: Raw data from API (destinations, entities, live wait times)
-- **Silver Layer**: Cleaned and normalized data (planned)
-- **Gold Layer**: Aggregated analytics (planned)
+1. **Destinations** - Theme park resort locations and their parks (daily)
+2. **Entities** - Attractions, shows, and facilities within each park (daily)
+3. **Live Data** - Real-time wait times and operational status (every 5 minutes)
 
-## Features
+The pipeline uses asynchronous Python for efficient parallel API calls and can be filtered to specific park chains (e.g., Disney, Universal).
 
-- Async API client with parallel fetching across multiple parks
-- Modular pipeline architecture with pluggable load targets (CSV, Parquet)
-- Airflow DAGs for scheduled extraction
-- Park filtering (e.g., Disney parks only)
+## Architecture
 
-## Requirements
+- **Orchestration**: Apache Airflow (Astronomer Runtime)
+- **Data Collection**: Async HTTP client (`httpx`) for parallel API requests
+- **Scheduling**: Asset-based DAGs with configurable intervals
+- **Data Formats**: JSON with extensible loader framework (CSV, Parquet, Iceberg, Kafka, MinIO)
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Apache Airflow 3.x (optional, for orchestration)
+## ETL Pipeline
 
-## Installation
+### DAGs
 
-```bash
-# Clone the repository
-git clone https://github.com/your-username/themeparks-data-engineering.git
-cd themeparks-data-engineering
+#### 1. Theme Park Destinations (`themepark_destination_dag.py`)
+- **Schedule**: Daily (`@daily`)
+- **Purpose**: Fetches all theme park destinations and their associated parks
+- **Output**: Destinations list with park hierarchies
+- **Asset**: `raw_theme_park_destinations`
 
-# Install dependencies with uv
-uv sync
-```
+#### 2. Theme Park Entities (`themepark_entities_dag.py`)
+- **Schedule**: Daily (`@daily`)
+- **Purpose**: Fetches all attractions, shows, and facilities within parks
+- **Parameters**: 
+  - `park_filter` (default: `'disney'`) - Filter destinations by name
+- **Output**: Flattened entity records with park associations
+- **Asset**: `raw_theme_park_entities`
+- **Features**:
+  - Parallel fetching of entity data for multiple parks
+  - Error handling for individual park failures
+  - Extracts entity ID, name, type, and park ID
 
-## Usage
+#### 3. Theme Park Live Data (`themepark_live_data_dag.py`)
+- **Schedule**: Every 5 minutes (`*/5 * * * *`)
+- **Purpose**: Fetches real-time wait times and operational status
+- **Parameters**:
+  - `park_filter` (default: `'disney'`) - Filter destinations by name
+- **Output**: Live status records with queue information
+- **Asset**: `raw_theme_park_live_data`
+- **Features**:
+  - High-frequency data collection for real-time analytics
+  - Captures wait times, ride status, and last updated timestamps
+  - Parallel processing across all filtered parks
 
-### Command Line
+### Data Extractors
 
-```bash
-# Run all pipelines (static + live data)
-uv run python src/main.py
+#### ThemeParks API Client (`include/extractors/themeparks.py`)
 
-# Run only static data (destinations + entities)
-uv run python src/main.py --static
+Async HTTP client for efficient API interaction:
 
-# Run only live wait times
-uv run python src/main.py --live
+**Key Methods**:
+- `get_destinations()` - Fetch all theme park resorts
+- `get_entity_children(entity_id)` - Get attractions within a park
+- `get_entity_live(entity_id)` - Get real-time wait times and status
+- `get_multiple_parks_live(park_ids)` - Batch fetch live data in parallel
 
-# Filter to specific parks
-uv run python src/main.py --live --filter disney
-```
+**Features**:
+- Async context manager for connection pooling
+- Parallel request processing with `asyncio.gather()`
+- Comprehensive error handling and logging
+- 30-second default timeout
 
-### Python API
+### Data Loaders
 
-```python
-import asyncio
-from extractors.themeparks_client import ThemeparksClient
+The `include/loaders/` directory contains extensible loader implementations:
 
-async def main():
-    async with ThemeparksClient() as client:
-        # Get all destinations
-        destinations = await client.get_destinations()
-        
-        # Get live data for multiple parks in parallel
-        park_ids = ["park-id-1", "park-id-2"]
-        live_data = await client.get_multiple_parks_live(park_ids)
-
-asyncio.run(main())
-```
+- **CsvLoader** - Export to CSV files
+- **ParquetLoader** - Export to Parquet format
+- **IcebergLoader** - Load to Apache Iceberg tables
+- **KafkaLoader** - Stream to Kafka topics
+- **MinioLoader** - Upload to MinIO object storage
+- **Loader** - Base loader interface
 
 ## Project Structure
 
 ```
 themeparks-data-engineering/
-├── src/
-│   ├── main.py                 # CLI entry point
+├── dags/                              # Airflow DAG definitions
+│   ├── themepark_destination_dag.py   # Destinations ETL
+│   ├── themepark_entities_dag.py      # Entities ETL
+│   └── themepark_live_data_dag.py     # Live data ETL (5-min)
+├── include/
 │   ├── extractors/
-│   │   └── themeparks_client.py  # Async API client
-│   ├── pipelines/
-│   │   ├── base.py             # Abstract base pipeline
-│   │   ├── destinations.py     # Destinations pipeline
-│   │   ├── entities.py         # Entities pipeline
-│   │   └── live_data.py        # Live wait times pipeline
-│   └── loaders/
-│       └── load_target.py      # CSV and Parquet targets
-├── dags/
-│   └── themeparks_dag.py       # Airflow DAG definitions
-├── data/
-│   └── bronze/                 # Raw data output
-├── pyproject.toml
-└── README.md
+│   │   └── themeparks.py              # Async API client
+│   └── loaders/                       # Data output handlers
+│       ├── Loader.py                  # Base loader interface
+│       ├── CsvLoader.py
+│       ├── ParquetLoader.py
+│       ├── IcebergLoader.py
+│       ├── KafkaLoader.py
+│       └── MinioLoader.py
+├── tests/                             # Unit tests
+├── Dockerfile                         # Astronomer Runtime image
+├── requirements.txt                   # Python dependencies
+├── packages.txt                       # OS-level packages
+└── airflow_settings.yaml             # Local Airflow config
+
 ```
 
-## Airflow Integration
+## Getting Started
 
-Three DAGs are provided:
+### Prerequisites
 
-| DAG | Schedule | Description |
-|-----|----------|-------------|
-| `themeparks_static_daily` | 6 AM daily | Destinations and entity metadata |
-| `themeparks_live_frequent` | Every 5 min (8 AM - 11 PM) | Live wait times |
-| `themeparks_full_backfill` | Manual | Run all pipelines on demand |
+- [Astro CLI](https://docs.astronomer.io/astro/cli/install-cli) installed
+- Docker Desktop running
 
-### Setup Airflow (WSL/Linux)
+### Local Development
+
+1. **Start Airflow**:
+   ```bash
+   astro dev start
+   ```
+
+   This spins up 5 Docker containers:
+   - Postgres (Metadata Database)
+   - Scheduler
+   - DAG Processor
+   - API Server
+   - Triggerer
+
+2. **Access Airflow UI**:
+   - Navigate to http://localhost:8080
+   - Default credentials: `admin` / `admin`
+
+3. **Configure DAG Parameters** (Optional):
+   - In the Airflow UI, go to each DAG and click "Trigger DAG w/ config"
+   - Modify `park_filter` parameter to filter for specific theme parks:
+     - `'disney'` - All Disney parks
+     - `'universal'` - Universal parks
+     - `'cedar'` - Cedar Fair parks
+     - `''` - All parks (no filter)
+
+4. **Monitor Pipeline**:
+   - View DAG runs in the Airflow UI
+   - Check logs for extracted record counts
+   - Monitor asset dependencies
+
+### Testing
+
+Run DAG tests:
+```bash
+astro dev pytest
+```
+
+### Stopping Airflow
 
 ```bash
-# Create virtual environment
-python -m venv ~/.airflow-env
-source ~/.airflow-env/bin/activate
-
-# Install Airflow and dependencies
-pip install apache-airflow pandas pyarrow httpx python-dotenv
-pip install PyJWT==2.10.1  # Downgrade to fix auth issue
-
-# Initialize database
-airflow db init
-
-# Copy DAG file
-cp dags/themeparks_dag.py ~/airflow/dags/
-
-# Set environment variables
-export AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_JWT_ISSUER="airflow"
-export PYTHONPATH="/path/to/themeparks-data-engineering/src:$PYTHONPATH"
-
-# Start Airflow
-airflow standalone
+astro dev stop
 ```
 
-Access the UI at http://localhost:8080
+## Data Flow
+
+```
+ThemeParks.wiki API
+        ↓
+  [HTTP Client]
+        ↓
+   [Async Tasks]
+        ↓
+  [Data Assets]
+        ↓
+    [Loaders]
+        ↓
+  [Target Storage]
+```
+
+## API Reference
+
+This project uses the [ThemeParks.wiki API](https://api.themeparks.wiki/) which provides:
+- Live wait times for attractions
+- Show schedules
+- Park operating hours
+- Attraction details
+- Coverage for 100+ parks worldwide
+
+## Deployment
+
+To deploy to Astronomer:
+
+```bash
+astro deploy
+```
+
+For detailed deployment instructions, see [Astronomer Documentation](https://www.astronomer.io/docs/astro/deploy-code/).
 
 ## Configuration
 
-Set the data output directory via environment variable:
+### Airflow Settings (`airflow_settings.yaml`)
+Use this file to configure Connections, Variables, and Pools for local development.
 
-```bash
-export THEMEPARKS_DATA_DIR="/path/to/data"
-```
+### DAG Parameters
+- **park_filter**: Filter destinations by keyword (case-insensitive)
+- Configurable per-DAG execution via Airflow UI
 
-Defaults to the project's `data/` directory.
+## Contributing
 
-## API Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `/destinations` | List all theme park destinations |
-| `/entity/{id}` | Get details for a specific entity |
-| `/entity/{id}/children` | Get child entities (attractions, shows) |
-| `/entity/{id}/live` | Get live wait times and status |
-| `/entity/{id}/schedule` | Get operating schedules |
+When adding new DAGs or modifying existing ones:
+1. Follow the asset-based pattern for dependencies
+2. Use async methods for API calls
+3. Implement proper error handling
+4. Add unit tests in `tests/dags/`
 
 ## License
 
-MIT
+This project uses the Apache 2.0 license as provided by Astronomer.
