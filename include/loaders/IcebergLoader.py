@@ -12,7 +12,7 @@ import pandas as pd
 from pyspark.sql import SparkSession
 from pyspark.sql import DataFrame as SparkDataFrame
 
-from loaders.Loader import Loader
+from .Loader import Loader
 
 logger = logging.getLogger(__name__)
 

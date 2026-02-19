@@ -3,7 +3,7 @@ import csv
 from typing import overload, override, Union
 from pandas import DataFrame
 
-from loaders.Loader import Loader
+from .Loader import Loader
 
 class CsvLoader(Loader):
 

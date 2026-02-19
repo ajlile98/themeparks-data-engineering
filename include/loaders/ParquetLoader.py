@@ -2,7 +2,7 @@
 from typing import override
 from pandas import DataFrame
 
-from loaders.Loader import Loader
+from .Loader import Loader
 
 class ParquetLoader(Loader):
     """Load data to Parquet format with optional partitioning."""

@@ -2,8 +2,8 @@ from typing import override
 from pandas import DataFrame
 from datetime import datetime
 
-from loaders.Loader import Loader
-from loaders.MinioStorage import MinioStorage
+from .Loader import Loader
+from .MinioStorage import MinioStorage
 
 
 class MinioLoader(Loader):

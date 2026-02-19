@@ -1,1 +1,19 @@
 # Astro Runtime includes the following pre-installed providers packages: https://www.astronomer.io/docs/astro/runtime-image-architecture#provider-packages
+
+# Object storage (S3/MinIO via ObjectStoragePath)
+apache-airflow-providers-amazon[s3fs]
+
+# Parquet serialization
+pyarrow==23.0.1
+
+# Async HTTP client (ThemeParks extractor)
+# httpx
+
+# MinIO direct client (used by MinioStorage/MinioLoader)
+# minio
+
+# Kafka (KafkaLoader)
+# kafka-python
+
+# PySpark / Iceberg (IcebergLoader - remove if not using)
+# pyspark

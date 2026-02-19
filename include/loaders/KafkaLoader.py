@@ -5,7 +5,7 @@ from typing import Generator, override
 
 from kafka import KafkaProducer
 from pandas import DataFrame
-from loaders.Loader import Loader
+from .Loader import Loader
 
 from pandas.core.common import standardize_mapping
 from pandas.core.dtypes.cast import maybe_box_native
