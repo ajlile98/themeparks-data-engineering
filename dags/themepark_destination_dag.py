@@ -17,14 +17,12 @@ def raw_theme_park_destinations() -> list[dict]:
     async def fetch_destinations():
         """Async function to fetch theme park destinations"""
         async with ThemeParksClient() as client:
-            # Get all destinations
             print("\nFetching all destinations...")
             
             destinations = await client.get_destinations()
             print(f"Found {len(destinations.get('destinations', []))} destinations\n")
             
-            return destinations
+            return destinations.get('destinations', [])
     
-    # Run the async function synchronously
     return asyncio.run(fetch_destinations())
 

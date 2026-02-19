@@ -15,6 +15,7 @@ from airflow.sdk import Asset, dag, task, asset, get_current_context
         "park_filter": 'disney'
     }
     )
+@task(inlets=Asset("raw_theme_park_entities"))
 def raw_theme_park_live_data() -> list[dict]:
     """extracts theme park live data"""
     from include.extractors.themeparks import ThemeParksClient
@@ -22,36 +23,26 @@ def raw_theme_park_live_data() -> list[dict]:
     
     ctx = get_current_context()
 
-    park_filter = ctx['params']['park_filter'].lower().strip()
-
     async def fetch_live_data():
         """Async function to fetch theme park live data"""
         async with ThemeParksClient() as client:
-            # Get destinations
-            data = await client.get_destinations()
-            destinations = data.get("destinations", [])
-            
-            # Apply filter if specified
-            if park_filter:
-                destinations = [
-                    d for d in destinations 
-                    if park_filter.lower() in d.get("name", "").lower()
-                ]
-                print(f"Filtered to {len(destinations)} destinations")
-            
-            # Collect all park IDs
-            park_ids = []
-            for dest in destinations:
-                parks = dest.get("parks", [])
-                park_ids.extend([p.get("id") for p in parks if p.get("id")])
+            entities = ctx["ti"].xcom_pull(
+                dag_id="raw_theme_park_entities",
+                task_ids="raw_theme_park_entities",
+                key="return_value",
+                include_prior_dates=True,
+            )
+
+            if entities is None:
+                entities = []
+
+            park_ids = sorted({e.get("park_id") for e in entities if isinstance(e, dict) and e.get("park_id")})
             
             print(f"Fetching live data for {len(park_ids)} parks")
             
-            # Fetch live data for all parks in parallel
             tasks = [client.get_entity_live(park_id) for park_id in park_ids]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Flatten results
             records = []
             for park_id, result in zip(park_ids, results):
                 if isinstance(result, Exception):
@@ -66,7 +57,7 @@ def raw_theme_park_live_data() -> list[dict]:
                         "name": item.get("name"),
                         "entityType": item.get("entityType"),
                         "status": item.get("status"),
-                        "queue": str(item.get("queue", {})),  # Serialize to string
+                        "queue": str(item.get("queue", {})),  
                         "lastUpdated": item.get("lastUpdated"),
                     }
                     records.append(record)
@@ -74,6 +65,5 @@ def raw_theme_park_live_data() -> list[dict]:
             print(f"Extracted {len(records)} live records from {len(park_ids)} parks")
             return records
     
-    # Run the async function synchronously
     return asyncio.run(fetch_live_data())
 
