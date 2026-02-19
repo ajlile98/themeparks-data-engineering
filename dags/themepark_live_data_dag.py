@@ -7,6 +7,7 @@ then gets existing wait times for each ride in each park.
 
 """
 
+from datetime import datetime
 from airflow.sdk import Asset, dag, task, asset, get_current_context
 
 @asset(
@@ -22,6 +23,7 @@ def raw_theme_park_live_data() -> list[dict]:
     import asyncio
     
     ctx = get_current_context()
+    ingest_timestamp = datetime.now().isoformat()
 
     async def fetch_live_data():
         """Async function to fetch theme park live data"""
@@ -31,7 +33,7 @@ def raw_theme_park_live_data() -> list[dict]:
                 task_ids="raw_theme_park_entities",
                 key="return_value",
                 include_prior_dates=True,
-            )
+            )[0]
 
             if entities is None:
                 entities = []
@@ -59,6 +61,7 @@ def raw_theme_park_live_data() -> list[dict]:
                         "status": item.get("status"),
                         "queue": str(item.get("queue", {})),  
                         "lastUpdated": item.get("lastUpdated"),
+                        "ingest_timestamp": ingest_timestamp,
                     }
                     records.append(record)
             

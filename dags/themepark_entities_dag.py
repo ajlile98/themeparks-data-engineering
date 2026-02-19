@@ -6,6 +6,7 @@ This DAG queries the list of theme parks entities available on themepark api
 
 """
 
+from datetime import datetime
 from airflow.sdk import Asset, dag, task, asset, get_current_context
 
 
@@ -20,12 +21,13 @@ def raw_theme_park_entities(context: dict) -> list[dict]:
     async def fetch_entities():
         """Async function to fetch theme park entities"""
         async with ThemeParksClient() as client:
+            ingest_timestamp = datetime.now().isoformat()
             destinations = context["ti"].xcom_pull(
                 dag_id="raw_theme_park_destinations",
                 task_ids="raw_theme_park_destinations",
                 key="return_value",
                 include_prior_dates=True,
-                )
+                )[0]
             
             print(f"Count of destinations from asset: {len(destinations)}")
             print(destinations)
@@ -53,6 +55,7 @@ def raw_theme_park_entities(context: dict) -> list[dict]:
                         "id": entity.get("id"),
                         "name": entity.get("name"),
                         "entityType": entity.get("entityType"),
+                        "ingest_timestamp": ingest_timestamp,
                     }
                     records.append(record)
             
