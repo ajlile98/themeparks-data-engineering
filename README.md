@@ -1,203 +1,291 @@
 # Theme Parks Data Engineering
 
-A real-time ETL pipeline for collecting and processing theme park data from the [ThemeParks.wiki API](https://api.themeparks.wiki/). This project uses Apache Airflow to orchestrate data collection for destinations, park entities, and live wait times across major theme parks worldwide.
+A real-time ETL pipeline for collecting and processing theme park data from the [ThemeParks.wiki API](https://api.themeparks.wiki/). Built with Apache Airflow (Astronomer Runtime) using **asset-based DAG dependencies** to create a self-managing, event-driven pipeline that extracts destinations, park entities, and live wait times, and loads them into MinIO object storage as Parquet files.
 
-## Overview
+---
 
-This data engineering pipeline collects three types of data from theme parks:
+## Architecture Overview
 
-1. **Destinations** - Theme park resort locations and their parks (daily)
-2. **Entities** - Attractions, shows, and facilities within each park (daily)
-3. **Live Data** - Real-time wait times and operational status (every 5 minutes)
+The pipeline is structured as a four-stage asset dependency chain. Each DAG produces an Airflow **Asset** that triggers the next stage automatically, with the live data DAG running independently on its own schedule while still consuming entity data.
 
-The pipeline uses asynchronous Python for efficient parallel API calls and can be filtered to specific park chains (e.g., Disney, Universal).
+```
+┌──────────────────────────────────────────────────────────┐
+│                  ThemeParks.wiki API                     │
+└─────────────────────┬────────────────────────────────────┘
+                      │ HTTPS
+        ┌─────────────▼─────────────┐
+        │   raw_theme_park_         │  Schedule: 0 */1 * * *
+        │   destinations            │  (every hour)
+        │   [Asset produced]        │
+        └─────────────┬─────────────┘
+                      │ triggers (Asset dependency)
+        ┌─────────────▼─────────────┐
+        │   raw_theme_park_         │  Schedule: [Asset("raw_theme_park_destinations")]
+        │   entities                │  (runs when destinations asset updates)
+        │   [Asset produced]        │
+        └──────┬────────────────────┘
+               │ triggers (Asset dependency)   ┌───────────────────────────────┐
+               │                               │  raw_theme_park_live_data     │
+               │                               │  Schedule: */5 * * * *        │
+               │                               │  inlets: raw_theme_park_      │
+               │                               │  entities (reads XCom)        │
+               │                               │  [Asset produced]             │
+               │                               └────────────┬──────────────────┘
+               │                                            │
+        ┌──────▼────────────────────────────────────────────▼──────┐
+        │          load_themeparks_to_minio                        │
+        │          Schedule: [destinations ∨ entities ∨ live]      │
+        │          Writes Parquet → MinIO (watermarked)            │
+        └──────────────────────────────────────────────────────────┘
+```
 
-## Architecture
+---
 
-- **Orchestration**: Apache Airflow (Astronomer Runtime)
-- **Data Collection**: Async HTTP client (`httpx`) for parallel API requests
-- **Scheduling**: Asset-based DAGs with configurable intervals
-- **Data Formats**: JSON with extensible loader framework (CSV, Parquet, Iceberg, Kafka, MinIO)
+## DAGs
 
-## ETL Pipeline
+### 1. `raw_theme_park_destinations`
+**File**: [dags/themepark_destination_dag.py](dags/themepark_destination_dag.py)
 
-### DAGs
+| Property | Value |
+|---|---|
+| Schedule | `0 */1 * * *` (every hour) |
+| Asset produced | `raw_theme_park_destinations` |
+| Returns | `list[dict]` — one record per destination |
+| Triggers | `raw_theme_park_entities`, `load_themeparks_to_minio` |
 
-#### 1. Theme Park Destinations (`themepark_destination_dag.py`)
-- **Schedule**: Daily (`@daily`)
-- **Purpose**: Fetches all theme park destinations and their associated parks
-- **Output**: Destinations list with park hierarchies
-- **Asset**: `raw_theme_park_destinations`
+Calls `GET /destinations` on the ThemeParks.wiki API and returns the full list of theme park resorts with their associated park hierarchies. Each record is tagged with an `ingest_timestamp` (`datetime.now().isoformat()`).
 
-#### 2. Theme Park Entities (`themepark_entities_dag.py`)
-- **Schedule**: Daily (`@daily`)
-- **Purpose**: Fetches all attractions, shows, and facilities within parks
-- **Parameters**: 
-  - `park_filter` (default: `'disney'`) - Filter destinations by name
-- **Output**: Flattened entity records with park associations
-- **Asset**: `raw_theme_park_entities`
-- **Features**:
-  - Parallel fetching of entity data for multiple parks
-  - Error handling for individual park failures
-  - Extracts entity ID, name, type, and park ID
+---
 
-#### 3. Theme Park Live Data (`themepark_live_data_dag.py`)
-- **Schedule**: Every 5 minutes (`*/5 * * * *`)
-- **Purpose**: Fetches real-time wait times and operational status
-- **Parameters**:
-  - `park_filter` (default: `'disney'`) - Filter destinations by name
-- **Output**: Live status records with queue information
-- **Asset**: `raw_theme_park_live_data`
-- **Features**:
-  - High-frequency data collection for real-time analytics
-  - Captures wait times, ride status, and last updated timestamps
-  - Parallel processing across all filtered parks
+### 2. `raw_theme_park_entities`
+**File**: [dags/themepark_entities_dag.py](dags/themepark_entities_dag.py)
 
-### Data Extractors
+| Property | Value |
+|---|---|
+| Schedule | `[Asset("raw_theme_park_destinations")]` |
+| Asset produced | `raw_theme_park_entities` |
+| Returns | `list[dict]` — one record per entity (attraction, show, facility) |
+| Triggers | `load_themeparks_to_minio` |
 
-#### ThemeParks API Client (`include/extractors/themeparks.py`)
+Fires automatically when the destinations asset is refreshed. Pulls the destinations XCom to extract all `park_id` values, then fetches `GET /entity/{id}/children` for every park in parallel using `asyncio.gather()`. Records contain: `park_id`, `id`, `name`, `entityType`, `ingest_timestamp`.
 
-Async HTTP client for efficient API interaction:
+**XCom pull pattern** (string `task_ids`, not list, to avoid shape-wrapping):
+```python
+destinations = context["ti"].xcom_pull(
+    dag_id="raw_theme_park_destinations",
+    task_ids="raw_theme_park_destinations",
+    key="return_value",
+    include_prior_dates=True,
+)[0]
+```
 
-**Key Methods**:
-- `get_destinations()` - Fetch all theme park resorts
-- `get_entity_children(entity_id)` - Get attractions within a park
-- `get_entity_live(entity_id)` - Get real-time wait times and status
-- `get_multiple_parks_live(park_ids)` - Batch fetch live data in parallel
+---
 
-**Features**:
-- Async context manager for connection pooling
-- Parallel request processing with `asyncio.gather()`
-- Comprehensive error handling and logging
-- 30-second default timeout
+### 3. `raw_theme_park_live_data`
+**File**: [dags/themepark_live_data_dag.py](dags/themepark_live_data_dag.py)
 
-### Data Loaders
+| Property | Value |
+|---|---|
+| Schedule | `*/5 * * * *` (every 5 minutes) |
+| Asset produced | `raw_theme_park_live_data` |
+| Inlets | `Asset("raw_theme_park_entities")` |
+| Returns | `list[dict]` — one record per attraction's live status |
+| Triggers | `load_themeparks_to_minio` |
 
-The `include/loaders/` directory contains extensible loader implementations:
+Runs independently every 5 minutes on its own cron schedule. Uses `inlets=Asset("raw_theme_park_entities")` to read the most recent entities XCom snapshot (`include_prior_dates=True`) and derive the set of `park_id` values to query. Then calls `GET /entity/{id}/liveData` in parallel for all parks. Records contain: `park_id`, `id`, `name`, `entityType`, `status`, `queue`, `lastUpdated`, `ingest_timestamp`.
 
-- **CsvLoader** - Export to CSV files
-- **ParquetLoader** - Export to Parquet format
-- **IcebergLoader** - Load to Apache Iceberg tables
-- **KafkaLoader** - Stream to Kafka topics
-- **MinioLoader** - Upload to MinIO object storage
-- **Loader** - Base loader interface
+---
+
+### 4. `load_themeparks_to_minio`
+**File**: [dags/themepark_minio_load_dag.py](dags/themepark_minio_load_dag.py)
+
+| Property | Value |
+|---|---|
+| Schedule | `[Asset("raw_theme_park_destinations") OR Asset("raw_theme_park_entities") OR Asset("raw_theme_park_live_data")]` |
+| Storage backend | MinIO via `ObjectStoragePath` |
+| Output format | Parquet (Snappy compressed) |
+| Watermarked | Yes — skips writes when `ingest_timestamp` hasn't changed |
+
+Triggered by any of the three upstream assets. For each dataset (`destinations`, `entities`, `live`), it:
+
+1. Pulls the raw XCom snapshot via `include_prior_dates=True`
+2. Compares the max `ingest_timestamp` against a stored Airflow Variable watermark
+3. Skips the write if the data hasn't changed since the last load
+4. Otherwise serializes to Parquet using `pandas` + `pyarrow` and writes to partitioned path
+5. Updates the watermark Variable
+
+**Output path pattern**:
+```
+s3://airflow-data/themeparks-pipeline/bronze/{pipeline}/{YYYY-MM-DD}/{HH-MM-SS}.parquet
+```
+
+**Watermark Variables** (auto-managed, pre-seeded as empty in `airflow_settings.yaml`):
+- `themeparks_minio_last_ingest_ts__destinations`
+- `themeparks_minio_last_ingest_ts__entities`
+- `themeparks_minio_last_ingest_ts__live`
+
+---
 
 ## Project Structure
 
 ```
 themeparks-data-engineering/
-├── dags/                              # Airflow DAG definitions
-│   ├── themepark_destination_dag.py   # Destinations ETL
-│   ├── themepark_entities_dag.py      # Entities ETL
-│   └── themepark_live_data_dag.py     # Live data ETL (5-min)
+├── dags/
+│   ├── themepark_destination_dag.py   # Hourly destinations extraction
+│   ├── themepark_entities_dag.py      # Asset-triggered entities extraction
+│   ├── themepark_live_data_dag.py     # 5-min live wait time extraction
+│   └── themepark_minio_load_dag.py    # Asset-triggered Parquet → MinIO loader
 ├── include/
 │   ├── extractors/
-│   │   └── themeparks.py              # Async API client
-│   └── loaders/                       # Data output handlers
-│       ├── Loader.py                  # Base loader interface
+│   │   └── themeparks.py              # Async httpx API client
+│   └── loaders/
+│       ├── __init__.py
+│       ├── Loader.py                  # Abstract base loader
 │       ├── CsvLoader.py
 │       ├── ParquetLoader.py
 │       ├── IcebergLoader.py
 │       ├── KafkaLoader.py
-│       └── MinioLoader.py
-├── tests/                             # Unit tests
-├── Dockerfile                         # Astronomer Runtime image
+│       ├── MinioLoader.py             # Direct MinIO client loader
+│       └── MinioStorage.py
+├── tests/
+│   └── dags/
+│       └── test_dag_example.py
+├── .env                               # Environment variables (local only)
+├── airflow_settings.yaml              # Connections, Variables, Pools (local only)
+├── Dockerfile                         # Astronomer Runtime base image
 ├── requirements.txt                   # Python dependencies
-├── packages.txt                       # OS-level packages
-└── airflow_settings.yaml             # Local Airflow config
-
+└── packages.txt                       # OS-level packages
 ```
+
+---
+
+## Configuration
+
+### Environment Variables (`.env`)
+
+```dotenv
+OBJECT_STORAGE_SYSTEM=s3              # Storage scheme: s3, gs, file, etc.
+OBJECT_STORAGE_CONN_ID=minio_default  # Airflow connection ID
+OBJECT_STORAGE_PATH=airflow-data/themeparks-pipeline  # Base bucket/prefix
+
+MINIO_ENDPOINT=https://minio-api.andylile.com
+MINIO_ACCESS_KEY=<your-access-key>
+MINIO_SECRET_KEY=<your-secret-key>
+```
+
+### Airflow Connection (`airflow_settings.yaml`)
+
+```yaml
+connections:
+  - conn_id: minio_default
+    conn_type: aws
+    conn_login: <MINIO_ACCESS_KEY>
+    conn_password: <MINIO_SECRET_KEY>
+    conn_extra:
+      endpoint_url: https://minio-api.andylile.com
+      region_name: us-east-1
+      addressing_style: path
+```
+
+The `addressing_style: path` setting is required for MinIO (forces path-style URLs instead of virtual-hosted-style).
+
+---
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Astro CLI](https://docs.astronomer.io/astro/cli/install-cli) installed
-- Docker Desktop running
+- [Astro CLI](https://docs.astronomer.io/astro/cli/install-cli)
+- Docker Desktop
 
 ### Local Development
 
-1. **Start Airflow**:
-   ```bash
-   astro dev start
-   ```
-
-   This spins up 5 Docker containers:
-   - Postgres (Metadata Database)
-   - Scheduler
-   - DAG Processor
-   - API Server
-   - Triggerer
-
-2. **Access Airflow UI**:
-   - Navigate to http://localhost:8080
-   - Default credentials: `admin` / `admin`
-
-3. **Configure DAG Parameters** (Optional):
-   - In the Airflow UI, go to each DAG and click "Trigger DAG w/ config"
-   - Modify `park_filter` parameter to filter for specific theme parks:
-     - `'disney'` - All Disney parks
-     - `'universal'` - Universal parks
-     - `'cedar'` - Cedar Fair parks
-     - `''` - All parks (no filter)
-
-4. **Monitor Pipeline**:
-   - View DAG runs in the Airflow UI
-   - Check logs for extracted record counts
-   - Monitor asset dependencies
-
-### Testing
-
-Run DAG tests:
 ```bash
+# Start Airflow (Postgres, Scheduler, DAG Processor, API Server, Triggerer)
+astro dev start
+
+# Airflow UI: http://localhost:8080  (admin / admin)
+
+# Restart after config changes
+astro dev restart
+
+# Run tests
 astro dev pytest
-```
 
-### Stopping Airflow
-
-```bash
+# Stop
 astro dev stop
 ```
 
-## Data Flow
+### First Run
 
-```
-ThemeParks.wiki API
-        ↓
-  [HTTP Client]
-        ↓
-   [Async Tasks]
-        ↓
-  [Data Assets]
-        ↓
-    [Loaders]
-        ↓
-  [Target Storage]
-```
+Once Airflow is running:
+1. Trigger `raw_theme_park_destinations` manually from the UI — this starts the asset chain
+2. When it completes, `raw_theme_park_entities` fires automatically
+3. When entities completes, `load_themeparks_to_minio` fires and writes all three datasets to MinIO
+4. `raw_theme_park_live_data` runs independently every 5 minutes and also triggers a MinIO load on each run
+
+---
+
+## Data Model
+
+### Destinations
+| Field | Description |
+|---|---|
+| `id` | Destination ID |
+| `name` | Resort name |
+| `slug` | URL-safe identifier |
+| `parks` | List of parks in the resort |
+| `ingest_timestamp` | ISO8601 timestamp of extraction |
+
+### Entities
+| Field | Description |
+|---|---|
+| `park_id` | Parent park ID |
+| `id` | Entity ID |
+| `name` | Entity name |
+| `entityType` | `ATTRACTION`, `SHOW`, `RESTAURANT`, etc. |
+| `ingest_timestamp` | ISO8601 timestamp of extraction |
+
+### Live Data
+| Field | Description |
+|---|---|
+| `park_id` | Parent park ID |
+| `id` | Entity ID |
+| `name` | Entity name |
+| `entityType` | Entity type |
+| `status` | `OPERATING`, `DOWN`, `CLOSED`, etc. |
+| `queue` | Serialized wait time queue data |
+| `lastUpdated` | Last updated timestamp from API |
+| `ingest_timestamp` | ISO8601 timestamp of extraction |
+
+---
+
+## Dependencies
+
+| Package | Purpose |
+|---|---|
+| `apache-airflow-providers-amazon[s3fs]` | `ObjectStoragePath` S3/MinIO backend |
+| `pyarrow==23.0.1` | Parquet serialization |
+
+Optional (commented out in `requirements.txt`):
+- `httpx` — async HTTP (bundled in extractor)
+- `minio` — direct MinIO client (MinioLoader)
+- `kafka-python` — KafkaLoader
+- `pyspark` — IcebergLoader
+
+---
 
 ## API Reference
 
-This project uses the [ThemeParks.wiki API](https://api.themeparks.wiki/) which provides:
-- Live wait times for attractions
-- Show schedules
-- Park operating hours
-- Attraction details
-- Coverage for 100+ parks worldwide
+This project uses the [ThemeParks.wiki API](https://api.themeparks.wiki/v1):
 
-## Deployment
+| Endpoint | Used by |
+|---|---|
+| `GET /destinations` | `raw_theme_park_destinations` |
+| `GET /entity/{id}/children` | `raw_theme_park_entities` |
+| `GET /entity/{id}/liveData` | `raw_theme_park_live_data` |
 
-To deploy to Astronomer:
-
-```bash
-astro deploy
-```
-
-For detailed deployment instructions, see [Astronomer Documentation](https://www.astronomer.io/docs/astro/deploy-code/).
-
-## Configuration
-
-### Airflow Settings (`airflow_settings.yaml`)
-Use this file to configure Connections, Variables, and Pools for local development.
+Coverage: 100+ parks worldwide including Disney, Universal, SeaWorld, Cedar Fair, and more.
 
 ### DAG Parameters
 - **park_filter**: Filter destinations by keyword (case-insensitive)
