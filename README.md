@@ -33,12 +33,12 @@ A real-time lakehouse pipeline for collecting and processing theme park data fro
   └────────┬────────────┘                              │ triggers
            │ triggers (both)                           ▼
            ▼                              ┌──────────────────────┐
-  ┌─────────────────────┐                │ gold_live_data_       │
-  │ iceberg_destinations│                │ current              │
-  │ → silver.destinations│               │ → gold.live_data_    │
-  │ → silver.parks      │               │   current            │
-  │   (Iceberg/Nessie)  │               │   (deduplicated)     │
-  └─────────────────────┘               └──────────────────────┘
+  ┌─────────────────────┐                 │ gold_live_data_      │
+  │ iceberg_destinations│                 │ current              │
+  │ → silver.destinations│                │ → gold.live_data_    │
+  │ → silver.parks      │                 │   current            │
+  │   (Iceberg/Nessie)  │                 │   (deduplicated)     │
+  └─────────────────────┘                 └──────────────────────┘
   ┌─────────────────────┐
   │ iceberg_entities    │
   │ → silver.entities   │
@@ -181,7 +181,8 @@ themeparks-data-engineering/
 │   ├── themepark_destinations_iceberg_dag.py  # bronze → silver.destinations + silver.parks
 │   ├── themepark_entities_iceberg_dag.py      # bronze → silver.entities (overwrite)
 │   ├── themepark_live_iceberg_dag.py          # bronze → silver.live_data (append, flat queue)
-│   └── themepark_live_gold_dag.py             # silver.live_data → gold.live_data_current
+│   ├── themepark_live_gold_dag.py             # silver.live_data → gold.live_data_current
+│   └── themepark_maintenance_dag.py           # Daily Iceberg snapshot expiration
 ├── include/
 │   ├── extractors/
 │   │   └── themeparks.py                      # Async httpx API client
@@ -381,6 +382,52 @@ This project uses the [ThemeParks.wiki API](https://api.themeparks.wiki/v1):
 | `GET /entity/{id}/liveData` | `raw_theme_park_live_data` |
 
 Coverage: 100+ parks worldwide including Disney, Universal, SeaWorld, Cedar Fair, and more.
+
+---
+
+---
+
+## Maintenance
+
+### Iceberg Snapshot Expiration
+
+**File**: [dags/themepark_maintenance_dag.py](dags/themepark_maintenance_dag.py)
+
+Runs daily at 03:00 UTC. Expires old Iceberg snapshots and deletes the orphaned
+Parquet data files they referenced.
+
+> **Why not S3 lifecycle rules on `iceberg/`?** Lifecycle rules delete files
+> based on age alone — they can remove a Parquet file still referenced by a
+> valid snapshot, corrupting the table. `expire_snapshots()` marks files as
+> orphaned in Iceberg metadata first, so deletion is always safe.
+
+| Table | Retain snapshots newer than | Min kept |
+|---|---|---|
+| `silver.live_data` | 30 days | 5 |
+| `gold.live_data_current` | 7 days | 2 |
+| `silver.destinations` | 7 days | 1 |
+| `silver.parks` | 7 days | 1 |
+| `silver.entities` | 7 days | 1 |
+
+Reference tables (`destinations`, `parks`, `entities`) overwrite on every run
+so they rarely accumulate more than 2 snapshots — the expiry is a safety net.
+
+### Bronze File Retention
+
+Bronze JSONL files are standalone (no Iceberg references) — safe to expire via
+MinIO Client (`mc`) lifecycle rules:
+
+```bash
+# 7-day expiry on reference bronze files (already in silver)
+mc ilm rule add --expire-days 7 --prefix "bronze/destinations/" myminio/airflow-data
+mc ilm rule add --expire-days 7 --prefix "bronze/entities/"     myminio/airflow-data
+
+# 30-day expiry on live bronze (longer — historical audit trail)
+mc ilm rule add --expire-days 30 --prefix "bronze/live/"         myminio/airflow-data
+
+# Verify
+mc ilm rule ls myminio/airflow-data
+```
 
 ---
 
