@@ -80,6 +80,7 @@ def append_to_iceberg(
     table_name: str,
     records: list[dict],
     overwrite: bool = False,
+    allow_schema_migration: bool = False,
 ) -> dict:
     """
     Convert records to a PyArrow table and write to the named Iceberg table.
@@ -92,12 +93,18 @@ def append_to_iceberg(
     overwrite=False (default): appends rows (suitable for time-series tables
     like live_data where history must be preserved).
 
+    allow_schema_migration=True: if the incoming Arrow schema is incompatible
+    with the existing Iceberg table schema, drop and recreate the table rather
+    than raising. Use this when a schema change is intentional (e.g. a struct
+    column has been flattened). Existing data is lost.
+
     Returns a summary dict with snapshot info.
     """
     import pyarrow as pa
     import pyarrow.json as paj
     import io
     import json
+    from pyiceberg.exceptions import ValidationError, ValidationException
 
     # Build Arrow table from records via NDJSON round-trip so PyArrow
     # infers types rather than defaulting everything to string.
@@ -124,9 +131,23 @@ def append_to_iceberg(
         tbl = catalog.load_table(full_name)
         if overwrite:
             tbl.overwrite(arrow_table)
+            print(f"[iceberg] overwrote '{full_name}' with {len(records)} rows")
         else:
-            tbl.append(arrow_table)
-        print(f"[iceberg] {operation}d {len(records)} rows to '{full_name}'")
+            try:
+                tbl.append(arrow_table)
+                print(f"[iceberg] appended {len(records)} rows to '{full_name}'")
+            except (ValidationError, ValidationException, ValueError) as e:
+                if allow_schema_migration:
+                    print(
+                        f"[iceberg] schema conflict on '{full_name}': {e}\n"
+                        f"[iceberg] allow_schema_migration=True — dropping and recreating table"
+                    )
+                    catalog.drop_table(full_name)
+                    tbl = catalog.create_table(full_name, schema=arrow_table.schema)
+                    tbl.append(arrow_table)
+                    print(f"[iceberg] recreated '{full_name}' and wrote {len(records)} rows")
+                else:
+                    raise
     else:
         tbl = catalog.create_table(full_name, schema=arrow_table.schema)
         tbl.append(arrow_table)
