@@ -28,5 +28,5 @@ def iceberg_entities(context: dict) -> dict:
     print(f"[entities] read {len(records)} records from {path}")
 
     catalog = get_catalog()
-    result = append_to_iceberg(catalog, namespace="silver", table_name="entities", records=records)
+    result = append_to_iceberg(catalog, namespace="silver", table_name="entities", records=records, overwrite=True)
     return result

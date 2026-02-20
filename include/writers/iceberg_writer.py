@@ -79,10 +79,18 @@ def append_to_iceberg(
     namespace: str,
     table_name: str,
     records: list[dict],
+    overwrite: bool = False,
 ) -> dict:
     """
-    Convert records to a PyArrow table and append to the named Iceberg table.
+    Convert records to a PyArrow table and write to the named Iceberg table.
     Creates the namespace and table on first run.
+
+    overwrite=True: replaces the entire table contents (suitable for reference
+    tables like destinations, parks, entities where each run fetches the full
+    current dataset).
+
+    overwrite=False (default): appends rows (suitable for time-series tables
+    like live_data where history must be preserved).
 
     Returns a summary dict with snapshot info.
     """
@@ -110,10 +118,15 @@ def append_to_iceberg(
         catalog.create_namespace(namespace)
         print(f"[iceberg] created namespace '{namespace}'")
 
+    operation = "overwrite" if overwrite else "append"
+
     if catalog.table_exists(full_name):
         tbl = catalog.load_table(full_name)
-        tbl.append(arrow_table)
-        print(f"[iceberg] appended {len(records)} rows to '{full_name}'")
+        if overwrite:
+            tbl.overwrite(arrow_table)
+        else:
+            tbl.append(arrow_table)
+        print(f"[iceberg] {operation}d {len(records)} rows to '{full_name}'")
     else:
         tbl = catalog.create_table(full_name, schema=arrow_table.schema)
         tbl.append(arrow_table)
