@@ -3,8 +3,11 @@
 # Object storage (S3/MinIO via ObjectStoragePath)
 apache-airflow-providers-amazon[s3fs]
 
-# Parquet serialization
+# Parquet serialization + Arrow (used by PyIceberg)
 pyarrow==23.0.1
+
+# Iceberg table format with Nessie REST catalog + S3/MinIO filesystem
+pyiceberg[s3fs,nessie]>=0.7.0
 
 # Async HTTP client (ThemeParks extractor)
 # httpx
