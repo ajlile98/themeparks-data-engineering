@@ -1,0 +1,59 @@
+services:
+  # Extend the Airflow scheduler so it can reach the nessie service.
+  # Docker Compose merges the networks list, so the scheduler gets
+  # both its original Airflow network AND the new shared one.
+  scheduler:
+    networks:
+      - nessie-net
+
+  nessie-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nessie
+      POSTGRES_USER: nessie
+      POSTGRES_PASSWORD: nessie
+    volumes:
+      - nessie-db-data:/var/lib/postgresql/data
+    networks:
+      - nessie-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nessie -d nessie"]
+      interval: 5s
+      retries: 10
+
+  nessie:
+    image: ghcr.io/projectnessie/nessie:latest
+    ports:
+      - "19120:19120"
+    environment:
+      # Catalog persistence
+      - nessie.version.store.type=JDBC
+      - quarkus.datasource.db-kind=postgresql
+      - quarkus.datasource.jdbc.url=jdbc:postgresql://nessie-db:5432/nessie
+      - quarkus.datasource.username=nessie
+      - quarkus.datasource.password=nessie
+      # Iceberg REST catalog — warehouse stored on MinIO
+      - nessie.catalog.default-warehouse=themeparks
+      - nessie.catalog.warehouses.themeparks.location=s3://airflow-data/iceberg
+      # MinIO S3 credentials for Nessie to read/write Iceberg metadata
+      - nessie.catalog.service.s3.default-options.auth-type=STATIC
+      - nessie.catalog.service.s3.default-options.region=us-east-1
+      - nessie.catalog.service.s3.default-options.endpoint=${MINIO_ENDPOINT}
+      - nessie.catalog.service.s3.default-options.path-style-access=true
+      - nessie.catalog.service.s3.default-options.access-key=urn:nessie-secret:quarkus:my-secrets.s3-default
+      - my-secrets.s3-default.name=${MINIO_ACCESS_KEY}
+      - my-secrets.s3-default.secret=${MINIO_SECRET_KEY}
+
+    depends_on:
+      nessie-db:
+        condition: service_healthy
+    networks:
+      - nessie-net
+
+volumes:
+  nessie-db-data:
+
+networks:
+  nessie-net:
+    name: nessie-net
+
