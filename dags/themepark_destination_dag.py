@@ -1,35 +1,35 @@
 
 """
-## Theme Park ETL 
+## Theme Park ETL — Destinations (bronze)
 
-This DAG queries the live data of theme parks available on themepark api
-
+Hourly extraction of all theme park destinations from the ThemeParks.wiki API.
+Raw records are written as JSONL to the MinIO bronze layer.
+Returns the object storage path string via XCom (~80 bytes — no S3 XCom backend needed).
 """
 
-from datetime import datetime
-from airflow.sdk import asset, get_current_context
+from datetime import datetime, timezone
+from airflow.sdk import asset
+
 
 @asset(schedule="0 */1 * * *")
-def raw_theme_park_destinations() -> list[dict]:
-    """extracts theme park destinations"""
+def raw_theme_park_destinations() -> str:
+    """Fetch all destinations and write to bronze layer. Returns JSONL path."""
     from include.extractors.themeparks import ThemeParksClient
+    from include.writers.bronze_writer import write_bronze
     import asyncio
 
-    ingest_timestamp = datetime.now().isoformat()
+    ingest_timestamp = datetime.now(timezone.utc).isoformat()
 
-    async def fetch_destinations():
-        """Async function to fetch theme park destinations"""
+    async def fetch():
         async with ThemeParksClient() as client:
-            print("\nFetching all destinations...")
-            
-            destinations = await client.get_destinations()
-            print(f"Found {len(destinations.get('destinations', []))} destinations\n")
+            print("Fetching all destinations...")
+            response = await client.get_destinations()
+            records = response.get("destinations", [])
+            print(f"Found {len(records)} destinations")
+            for r in records:
+                r["ingest_timestamp"] = ingest_timestamp
+            return records
 
-            destination_records = destinations.get('destinations', [])
-            for destination in destination_records:
-                destination["ingest_timestamp"] = ingest_timestamp
-
-            return destination_records
-    
-    return asyncio.run(fetch_destinations())
+    records = asyncio.run(fetch())
+    return write_bronze(records, prefix="destinations")
 
