@@ -10,11 +10,17 @@ Queue data is stored as a raw dict in JSONL (not stringified) so the silver
 Iceberg writer can flatten it properly.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from airflow.sdk import asset, get_current_context
 
 
-@asset(schedule="*/5 * * * *")
+@asset(
+    schedule="*/5 * * * *",
+    retries=3,
+    retry_delay=timedelta(seconds=30),
+    retry_exponential_backoff=True,
+    execution_timeout=timedelta(minutes=10),
+)
 def raw_theme_park_live_data() -> str:
     """Fetch live wait times for all parks and write to bronze layer. Returns JSONL path."""
     from include.extractors.themeparks import ThemeParksClient
@@ -27,7 +33,7 @@ def raw_theme_park_live_data() -> str:
     # XCom carries a tiny path string — no async conflict, no S3 backend pressure
     entities_path = ctx["ti"].xcom_pull(
         dag_id="raw_theme_park_entities",
-        task_ids="raw_theme_park_entities",
+        task_ids="merge_and_write",  # updated after dynamic-task-mapping restructure
         key="return_value",
         include_prior_dates=True,
     )

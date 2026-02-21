@@ -17,7 +17,7 @@ def iceberg_entities(context: dict) -> dict:
 
     path = context["ti"].xcom_pull(
         dag_id="raw_theme_park_entities",
-        task_ids="raw_theme_park_entities",
+        task_ids="merge_and_write",  # updated after dynamic-task-mapping restructure
         key="return_value",
         include_prior_dates=True,
     )

@@ -7,11 +7,17 @@ Raw records are written as JSONL to the MinIO bronze layer.
 Returns the object storage path string via XCom (~80 bytes — no S3 XCom backend needed).
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from airflow.sdk import asset
 
 
-@asset(schedule="0 */1 * * *")
+@asset(
+    schedule="0 */1 * * *",
+    retries=3,
+    retry_delay=timedelta(seconds=30),
+    retry_exponential_backoff=True,
+    execution_timeout=timedelta(minutes=5),
+)
 def raw_theme_park_destinations() -> str:
     """Fetch all destinations and write to bronze layer. Returns JSONL path."""
     from include.extractors.themeparks import ThemeParksClient

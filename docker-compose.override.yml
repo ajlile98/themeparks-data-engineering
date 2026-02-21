@@ -25,6 +25,8 @@ services:
     image: ghcr.io/projectnessie/nessie:latest
     ports:
       - "19120:19120"
+    env_file:
+      - .env
     environment:
       # Catalog persistence
       - nessie.version.store.type=JDBC
@@ -36,13 +38,14 @@ services:
       - nessie.catalog.default-warehouse=themeparks
       - nessie.catalog.warehouses.themeparks.location=s3://airflow-data/iceberg
       # MinIO S3 credentials for Nessie to read/write Iceberg metadata
+      # $$ escapes Docker Compose interpolation; Quarkus resolves the vars at runtime
       - nessie.catalog.service.s3.default-options.auth-type=STATIC
       - nessie.catalog.service.s3.default-options.region=us-east-1
-      - nessie.catalog.service.s3.default-options.endpoint=${MINIO_ENDPOINT}
+      - nessie.catalog.service.s3.default-options.endpoint=$${MINIO_ENDPOINT}
       - nessie.catalog.service.s3.default-options.path-style-access=true
       - nessie.catalog.service.s3.default-options.access-key=urn:nessie-secret:quarkus:my-secrets.s3-default
-      - my-secrets.s3-default.name=${MINIO_ACCESS_KEY}
-      - my-secrets.s3-default.secret=${MINIO_SECRET_KEY}
+      - my-secrets.s3-default.name=$${MINIO_ACCESS_KEY}
+      - my-secrets.s3-default.secret=$${MINIO_SECRET_KEY}
 
     depends_on:
       nessie-db:

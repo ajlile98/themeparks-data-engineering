@@ -27,16 +27,22 @@ class ThemeParksClient:
     Async client for the Themeparks API.
     
     Designed for efficient parallel data collection across multiple parks.
+    max_connections caps concurrent sockets to avoid overwhelming the upstream
+    API — httpx queues excess requests automatically at the transport layer.
     """
     
     BASE_URL = "https://api.themeparks.wiki/v1"
     
-    def __init__(self, timeout: float = 30.0):
+    def __init__(self, timeout: float = 30.0, max_connections: int = 10):
         self._client: httpx.AsyncClient | None = None
         self._timeout = timeout
+        self._max_connections = max_connections
     
     async def __aenter__(self):
-        self._client = httpx.AsyncClient(timeout=self._timeout)
+        self._client = httpx.AsyncClient(
+            timeout=self._timeout,
+            limits=httpx.Limits(max_connections=self._max_connections),
+        )
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -77,7 +83,17 @@ class ThemeParksClient:
         response = await self.client.get(f"{self.BASE_URL}/entity/{entity_id}/children")
         response.raise_for_status()
         return response.json()
-    
+
+    def get_entity_children_sync(self, entity_id: str) -> dict:
+        """
+        Synchronous single-call variant — no event loop overhead.
+        Use this when fetching one park's children in a mapped Airflow task
+        (Airflow workers provide the parallelism; async buys nothing here).
+        """
+        with httpx.Client(timeout=self._timeout) as client:
+            response = client.get(f"{self.BASE_URL}/entity/{entity_id}/children")
+            response.raise_for_status()
+            return response.json()
     async def get_entity_live(self, entity_id: str) -> dict:
         """Get live data for an entity (wait times, show times, etc.)."""
         response = await self.client.get(f"{self.BASE_URL}/entity/{entity_id}/live")
