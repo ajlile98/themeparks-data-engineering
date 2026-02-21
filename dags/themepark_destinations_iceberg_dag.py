@@ -17,7 +17,7 @@ def iceberg_destinations(context: dict) -> dict:
 
     path = context["ti"].xcom_pull(
         dag_id="raw_theme_park_destinations",
-        task_ids="raw_theme_park_destinations",
+        task_ids="fetch_and_write",
         key="return_value",
         include_prior_dates=True,
     )

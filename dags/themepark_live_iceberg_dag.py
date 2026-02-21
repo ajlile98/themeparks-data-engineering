@@ -72,7 +72,7 @@ def iceberg_live_data(context: dict) -> dict:
 
     path = context["ti"].xcom_pull(
         dag_id="raw_theme_park_live_data",
-        task_ids="raw_theme_park_live_data",
+        task_ids="fetch_and_write",
         key="return_value",
         include_prior_dates=True,
     )

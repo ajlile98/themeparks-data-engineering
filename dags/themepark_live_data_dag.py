@@ -11,63 +11,78 @@ Iceberg writer can flatten it properly.
 """
 
 from datetime import datetime, timezone, timedelta
-from airflow.sdk import asset, get_current_context
+from airflow.sdk import dag, task, Asset
+
+RAW_LIVE_DATA_ASSET = Asset("raw_theme_park_live_data")
 
 
-@asset(
+@dag(
     schedule="*/5 * * * *",
-    retries=3,
-    retry_delay=timedelta(seconds=30),
-    retry_exponential_backoff=True,
-    execution_timeout=timedelta(minutes=10),
+    catchup=False,
+    tags=["themeparks", "bronze"],
 )
-def raw_theme_park_live_data() -> str:
-    """Fetch live wait times for all parks and write to bronze layer. Returns JSONL path."""
-    from include.extractors.themeparks import ThemeParksClient
-    from include.writers.bronze_writer import read_bronze, write_bronze
-    import asyncio
+def raw_theme_park_live_data():
+    """Fetch live wait times for all parks every 5 minutes."""
 
-    ctx = get_current_context()
-    ingest_timestamp = datetime.now(timezone.utc).isoformat()
-
-    # XCom carries a tiny path string — no async conflict, no S3 backend pressure
-    entities_path = ctx["ti"].xcom_pull(
-        dag_id="raw_theme_park_entities",
-        task_ids="merge_and_write",  # updated after dynamic-task-mapping restructure
-        key="return_value",
-        include_prior_dates=True,
+    @task(
+        retries=3,
+        retry_delay=timedelta(seconds=30),
+        retry_exponential_backoff=True,
+        execution_timeout=timedelta(minutes=10),
+        outlets=[RAW_LIVE_DATA_ASSET],
     )
-    if isinstance(entities_path, list):
-        entities_path = entities_path[-1]  # take the most-recent path
-    entities = read_bronze(entities_path) if entities_path else []
-    park_ids = sorted({e["park_id"] for e in entities if isinstance(e, dict) and e.get("park_id")})
-    print(f"Fetching live data for {len(park_ids)} parks")
+    def fetch_and_write() -> str:
+        """Fetch live wait times for all parks and write to bronze layer. Returns JSONL path."""
+        from include.extractors.themeparks import ThemeParksClient
+        from include.writers.bronze_writer import read_bronze, write_bronze
+        from airflow.sdk import get_current_context
+        import asyncio
 
-    async def fetch(park_ids: list[str]):
-        async with ThemeParksClient() as client:
-            tasks = [client.get_entity_live(pid) for pid in park_ids]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        ctx = get_current_context()
+        ingest_timestamp = datetime.now(timezone.utc).isoformat()
 
-            records = []
-            for park_id, result in zip(park_ids, results):
-                if isinstance(result, Exception):
-                    print(f"Failed to get live data for park {park_id}: {result}")
-                    continue
-                for item in result.get("liveData", []):
-                    records.append({
-                        "park_id": park_id,
-                        "id": item.get("id"),
-                        "name": item.get("name"),
-                        "entityType": item.get("entityType"),
-                        "status": item.get("status"),
-                        # Store raw dict in bronze — silver layer flattens it
-                        "queue": item.get("queue", {}),
-                        "lastUpdated": item.get("lastUpdated"),
-                        "ingest_timestamp": ingest_timestamp,
-                    })
+        entities_path = ctx["ti"].xcom_pull(
+            dag_id="raw_theme_park_entities",
+            task_ids="merge_and_write",
+            key="return_value",
+            include_prior_dates=True,
+        )
+        if isinstance(entities_path, list):
+            entities_path = entities_path[-1]
+        entities = read_bronze(entities_path) if entities_path else []
+        park_ids = sorted({e["park_id"] for e in entities if isinstance(e, dict) and e.get("park_id")})
+        print(f"Fetching live data for {len(park_ids)} parks")
+
+        async def fetch(park_ids: list[str]):
+            async with ThemeParksClient() as client:
+                tasks = [client.get_entity_live(pid) for pid in park_ids]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                records = []
+                for park_id, result in zip(park_ids, results):
+                    if isinstance(result, Exception):
+                        print(f"Failed to get live data for park {park_id}: {result}")
+                        continue
+                    for item in result.get("liveData", []):
+                        records.append({
+                            "park_id": park_id,
+                            "id": item.get("id"),
+                            "name": item.get("name"),
+                            "entityType": item.get("entityType"),
+                            "status": item.get("status"),
+                            # Store raw dict in bronze — silver layer flattens it
+                            "queue": item.get("queue", {}),
+                            "lastUpdated": item.get("lastUpdated"),
+                            "ingest_timestamp": ingest_timestamp,
+                        })
             print(f"Extracted {len(records)} live records from {len(park_ids)} parks")
             return records
 
-    records = asyncio.run(fetch(park_ids))
-    return write_bronze(records, prefix="live")
+        records = asyncio.run(fetch(park_ids))
+        return write_bronze(records, prefix="live")
+
+    fetch_and_write()
+
+
+raw_theme_park_live_data()
 
