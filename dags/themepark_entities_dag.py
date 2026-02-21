@@ -33,8 +33,8 @@ def raw_theme_park_entities():
         retry_exponential_backoff=True,
         execution_timeout=timedelta(minutes=2),
     )
-    def get_park_ids(**context) -> dict:
-        """Read destinations bronze path from XCom, return park IDs and a shared ingest timestamp."""
+    def get_park_ids(**context) -> list[str]:
+        """Read destinations bronze path from XCom, return the list of park IDs."""
         from include.writers.bronze_writer import read_bronze
 
         destinations_path = context["ti"].xcom_pull(
@@ -53,9 +53,13 @@ def raw_theme_park_entities():
             for park in dest.get("parks", [])
             if park.get("id")
         ]
-        ingest_timestamp = datetime.now(timezone.utc).isoformat()
-        print(f"Resolved {len(park_ids)} park IDs from {destinations_path}, ingest_timestamp={ingest_timestamp}")
-        return {"park_ids": park_ids, "ingest_timestamp": ingest_timestamp}
+        print(f"Resolved {len(park_ids)} park IDs from {destinations_path}")
+        return park_ids
+
+    @task
+    def get_ingest_timestamp() -> str:
+        """Capture a single shared ingest timestamp for all mapped park tasks."""
+        return datetime.now(timezone.utc).isoformat()
 
     @task(
         retries=3,
@@ -91,8 +95,9 @@ def raw_theme_park_entities():
         print(f"Merging {len(merged)} entity records from {len(all_records)} parks")
         return write_bronze(merged, prefix="entities")
 
-    meta = get_park_ids()
-    per_park = fetch_park_entities.partial(ingest_timestamp=meta["ingest_timestamp"]).expand(park_id=meta["park_ids"])
+    park_ids = get_park_ids()
+    ingest_timestamp = get_ingest_timestamp()
+    per_park = fetch_park_entities.partial(ingest_timestamp=ingest_timestamp).expand(park_id=park_ids)
     merge_and_write(per_park)
 
 
