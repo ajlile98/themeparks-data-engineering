@@ -10,8 +10,10 @@ Warehouse:    s3://airflow-data/iceberg
 
 import os
 
-NESSIE_URI = "http://nessie:19120/iceberg"
-WAREHOUSE = "themeparks"  # matches nessie.catalog.default-warehouse in docker-compose.override.yml
+# Override via environment variables for portability across environments.
+# Defaults match the docker-compose.override.yml homelab setup.
+NESSIE_URI = os.environ.get("NESSIE_URI", "http://nessie:19120/iceberg")
+WAREHOUSE = os.environ.get("NESSIE_WAREHOUSE", "themeparks")
 
 
 def get_catalog():

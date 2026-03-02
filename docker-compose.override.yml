@@ -5,6 +5,9 @@ services:
   scheduler:
     networks:
       - nessie-net
+    environment:
+      - NESSIE_URI=http://nessie:19120/iceberg
+      - NESSIE_WAREHOUSE=themeparks
 
   nessie-db:
     image: postgres:16-alpine
