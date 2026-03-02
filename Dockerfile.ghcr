@@ -1,0 +1,41 @@
+# ============================================================
+# Custom Airflow image for homelab — published to GHCR
+#
+# Build:
+#   docker build -f Dockerfile.ghcr -t ghcr.io/<USER>/themeparks-airflow:latest .
+#
+# Push:
+#   docker push ghcr.io/<USER>/themeparks-airflow:latest
+# ============================================================
+
+FROM apache/airflow:3.1.7-python3.12
+
+LABEL org.opencontainers.image.source="https://github.com/ajlile98/themeparks-data-engineering"
+LABEL org.opencontainers.image.description="Airflow with PyIceberg, Nessie, and MinIO support"
+
+# ── System packages (packages.txt) ──────────────────────────
+# Switch to root only for apt; stays root for the RUN block.
+USER root
+COPY packages.txt /packages.txt
+RUN if [ -s /packages.txt ]; then \
+        apt-get update && \
+        xargs apt-get install -y --no-install-recommends < /packages.txt && \
+        apt-get clean && \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# ── Python packages (requirements.txt) ──────────────────────
+# Must install as the airflow user so the packages land in the
+# correct site-packages and Airflow's permission checks pass.
+#
+# NOTE: The Airflow constraint file pins pyiceberg to an old PyPI
+# placeholder package, so we skip it here. The base image already
+# locks Airflow's own core deps; extra packages are layered on top.
+USER airflow
+COPY requirements.txt /requirements.txt
+
+# Pass 1: pyiceberg first so its extras (s3fs, nessie) resolve cleanly
+RUN pip install --no-cache-dir "pyiceberg[s3fs,nessie]>=0.7.0"
+
+# Pass 2: remaining requirements (pyiceberg already satisfied, will be skipped)
+RUN pip install --no-cache-dir -r /requirements.txt
