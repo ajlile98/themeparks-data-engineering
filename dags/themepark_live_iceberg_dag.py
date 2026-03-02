@@ -46,9 +46,11 @@ def _flatten_queue(record: dict) -> dict:
         "lastUpdated": record.get("lastUpdated"),
         "ingest_timestamp": record.get("ingest_timestamp"),
         # ── STANDBY / SINGLE_RIDER / PAID_STANDBY ────────────────────────────
-        "queue_standby_wait":          standby.get("waitTime"),
-        "queue_single_rider_wait":     single.get("waitTime"),
-        "queue_paid_standby_wait":     paid.get("waitTime"),
+        # Explicitly cast to int so PyArrow never infers null() on all-None batches,
+        # which _sanitize_schema would wrongly promote to string in the Iceberg table.
+        "queue_standby_wait":          int(standby["waitTime"]) if standby.get("waitTime") is not None else None,
+        "queue_single_rider_wait":     int(single["waitTime"])  if single.get("waitTime")  is not None else None,
+        "queue_paid_standby_wait":     int(paid["waitTime"])    if paid.get("waitTime")    is not None else None,
         # ── RETURN_TIME ───────────────────────────────────────────────────────
         # Stored as strings to avoid PyArrow timestamp inference instability.
         "queue_return_time_state":     rt.get("state"),

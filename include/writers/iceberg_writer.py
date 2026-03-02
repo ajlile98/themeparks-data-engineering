@@ -130,8 +130,21 @@ def append_to_iceberg(
     if catalog.table_exists(full_name):
         tbl = catalog.load_table(full_name)
         if overwrite:
-            tbl.overwrite(arrow_table)
-            print(f"[iceberg] overwrote '{full_name}' with {len(records)} rows")
+            try:
+                tbl.overwrite(arrow_table)
+                print(f"[iceberg] overwrote '{full_name}' with {len(records)} rows")
+            except (ValidationError, ValidationException, ValueError) as e:
+                if allow_schema_migration:
+                    print(
+                        f"[iceberg] schema conflict on overwrite '{full_name}': {e}\n"
+                        f"[iceberg] allow_schema_migration=True — dropping and recreating table"
+                    )
+                    catalog.drop_table(full_name)
+                    tbl = catalog.create_table(full_name, schema=arrow_table.schema)
+                    tbl.append(arrow_table)
+                    print(f"[iceberg] recreated '{full_name}' and wrote {len(records)} rows")
+                else:
+                    raise
         else:
             try:
                 tbl.append(arrow_table)

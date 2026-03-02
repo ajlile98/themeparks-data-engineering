@@ -63,6 +63,7 @@ def gold_live_data_current(context: dict) -> dict:
         table_name=GOLD_TABLE,
         records=df_deduped.to_dict(orient="records"),
         overwrite=True,
+        allow_schema_migration=True,
     )
     print(f"[gold] overwrote {GOLD_NAMESPACE}.{GOLD_TABLE} with {deduped_rows} rows")
     return result
