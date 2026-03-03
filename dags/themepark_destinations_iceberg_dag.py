@@ -49,7 +49,7 @@ def iceberg_destinations(context: dict) -> dict:
     print(f"[parks] exploded {len(park_records)} park records from {len(records)} destinations")
 
     catalog = get_catalog()
-    result = append_to_iceberg(catalog, namespace="silver", table_name="destinations", records=records, overwrite=True)
-    parks_result = append_to_iceberg(catalog, namespace="silver", table_name="parks", records=park_records, overwrite=True)
+    result = append_to_iceberg(catalog, namespace="silver", table_name="destinations", records=records, overwrite=True, allow_schema_migration=True)
+    parks_result = append_to_iceberg(catalog, namespace="silver", table_name="parks", records=park_records, overwrite=True, allow_schema_migration=True)
     print(f"[parks] {parks_result}")
     return result
