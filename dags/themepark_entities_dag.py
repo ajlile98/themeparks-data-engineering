@@ -8,6 +8,11 @@ Uses **dynamic task mapping** — one `fetch_park_entities` task instance per
 park_id — so a single park's transient API failure is retried in isolation and
 does not block entity extraction for every other park.
 
+Source: GET https://queue-times.com/parks/{park_id}/queue_times.json
+Entities (rides) are extracted from the queue_times response — there is no
+dedicated entity-children endpoint in the queue-times.com API. Each ride
+record includes land grouping (land_id, land_name) as extra enrichment.
+
 Task graph:
   get_park_ids  →  fetch_park_entities[0..N]  →  merge_and_write
                     (one mapped task per park)      (emits the asset)
@@ -33,7 +38,7 @@ def raw_theme_park_entities():
         retry_exponential_backoff=True,
         execution_timeout=timedelta(minutes=2),
     )
-    def get_park_ids(**context) -> list[str]:
+    def get_park_ids(**context) -> list[int]:
         """Read destinations bronze path from XCom, return the list of park IDs."""
         from include.writers.bronze_writer import read_bronze
 
@@ -67,21 +72,24 @@ def raw_theme_park_entities():
         retry_exponential_backoff=True,
         execution_timeout=timedelta(minutes=5),
     )
-    def fetch_park_entities(park_id: str, ingest_timestamp: str) -> list[dict]:
-        """Fetch entity children for a single park. Retried independently on failure."""
-        from include.extractors.themeparks import ThemeParksClient
+    def fetch_park_entities(park_id: int, ingest_timestamp: str) -> list[dict]:
+        """Fetch ride catalog for a single park via queue_times. Retried independently on failure."""
+        from include.extractors.queue_times import QueueTimesClient
 
-        client = ThemeParksClient()
-        result = client.get_entity_children_sync(park_id)
+        client = QueueTimesClient()
+        result = client.get_park_queue_times_sync(park_id)
+        rides = QueueTimesClient.extract_rides(park_id, result)
         records = [
             {
-                "park_id": park_id,
-                "id": entity.get("id"),
-                "name": entity.get("name"),
-                "entityType": entity.get("entityType"),
+                "park_id":   ride["park_id"],
+                "land_id":   ride["land_id"],
+                "land_name": ride["land_name"],
+                "id":        ride["id"],
+                "name":      ride["name"],
+                "entityType": "ATTRACTION",
                 "ingest_timestamp": ingest_timestamp,
             }
-            for entity in result.get("children", [])
+            for ride in rides
         ]
         print(f"Park {park_id}: fetched {len(records)} entities")
         return records

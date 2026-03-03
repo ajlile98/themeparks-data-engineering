@@ -2,9 +2,13 @@
 """
 ## Theme Park ETL — Destinations (bronze)
 
-Hourly extraction of all theme park destinations from the ThemeParks.wiki API.
+Hourly extraction of all theme park companies and parks from queue-times.com.
 Raw records are written as JSONL to the MinIO bronze layer.
 Returns the object storage path string via XCom (~80 bytes — no S3 XCom backend needed).
+
+Source: GET https://queue-times.com/parks.json
+Shape:  List of company dicts, each with a nested 'parks' list containing
+        id, name, country, continent, latitude, longitude, timezone.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -19,7 +23,7 @@ RAW_DESTINATIONS_ASSET = Asset("raw_theme_park_destinations")
     tags=["themeparks", "bronze"],
 )
 def raw_theme_park_destinations():
-    """Hourly extraction of all theme park destinations from the ThemeParks.wiki API."""
+    """Hourly extraction of all theme park companies and parks from queue-times.com."""
 
     @task(
         retries=3,
@@ -29,19 +33,18 @@ def raw_theme_park_destinations():
         outlets=[RAW_DESTINATIONS_ASSET],
     )
     def fetch_and_write() -> str:
-        """Fetch all destinations and write to bronze layer. Returns JSONL path."""
-        from include.extractors.themeparks import ThemeParksClient
+        """Fetch all companies/parks and write to bronze layer. Returns JSONL path."""
+        from include.extractors.queue_times import QueueTimesClient
         from include.writers.bronze_writer import write_bronze
         import asyncio
 
         ingest_timestamp = datetime.now(timezone.utc).isoformat()
 
         async def fetch():
-            async with ThemeParksClient() as client:
-                print("Fetching all destinations...")
-                response = await client.get_destinations()
-                records = response.get("destinations", [])
-                print(f"Found {len(records)} destinations")
+            async with QueueTimesClient() as client:
+                print("Fetching all companies and parks...")
+                records = await client.get_parks()
+                print(f"Found {len(records)} companies")
                 for r in records:
                     r["ingest_timestamp"] = ingest_timestamp
                 return records

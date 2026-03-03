@@ -6,8 +6,9 @@ Runs every 5 minutes. Reads the entities JSONL path from XCom (tiny string),
 fetches current wait times for every ride in every park, and writes results
 to the bronze layer as JSONL. Returns the path string via XCom.
 
-Queue data is stored as a raw dict in JSONL (not stringified) so the silver
-Iceberg writer can flatten it properly.
+Source: GET https://queue-times.com/parks/{park_id}/queue_times.json
+Wait time data is already flat in the API response — no nested queue struct.
+Each record includes land grouping (land_id, land_name) as extra enrichment.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -33,7 +34,7 @@ def raw_theme_park_live_data():
     )
     def fetch_and_write() -> str:
         """Fetch live wait times for all parks and write to bronze layer. Returns JSONL path."""
-        from include.extractors.themeparks import ThemeParksClient
+        from include.extractors.queue_times import QueueTimesClient
         from include.writers.bronze_writer import read_bronze, write_bronze
         from airflow.sdk import get_current_context
         import asyncio
@@ -53,9 +54,9 @@ def raw_theme_park_live_data():
         park_ids = sorted({e["park_id"] for e in entities if isinstance(e, dict) and e.get("park_id")})
         print(f"Fetching live data for {len(park_ids)} parks")
 
-        async def fetch(park_ids: list[str]):
-            async with ThemeParksClient() as client:
-                tasks = [client.get_entity_live(pid) for pid in park_ids]
+        async def fetch(park_ids: list[int]):
+            async with QueueTimesClient() as client:
+                tasks = [client.get_park_queue_times(pid) for pid in park_ids]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 records = []
@@ -63,16 +64,18 @@ def raw_theme_park_live_data():
                     if isinstance(result, Exception):
                         print(f"Failed to get live data for park {park_id}: {result}")
                         continue
-                    for item in result.get("liveData", []):
+                    for ride in QueueTimesClient.extract_rides(park_id, result):
                         records.append({
-                            "park_id": park_id,
-                            "id": item.get("id"),
-                            "name": item.get("name"),
-                            "entityType": item.get("entityType"),
-                            "status": item.get("status"),
-                            # Store raw dict in bronze — silver layer flattens it
-                            "queue": item.get("queue", {}),
-                            "lastUpdated": item.get("lastUpdated"),
+                            "park_id":    ride["park_id"],
+                            "land_id":    ride["land_id"],
+                            "land_name":  ride["land_name"],
+                            "id":         ride["id"],
+                            "name":       ride["name"],
+                            "entityType": "ATTRACTION",
+                            "is_open":    ride["is_open"],
+                            "status":     "OPERATING" if ride["is_open"] else "CLOSED",
+                            "wait_time":  ride["wait_time"],
+                            "last_updated": ride["last_updated"],
                             "ingest_timestamp": ingest_timestamp,
                         })
             print(f"Extracted {len(records)} live records from {len(park_ids)} parks")
