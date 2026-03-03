@@ -83,6 +83,7 @@ def append_to_iceberg(
     records: list[dict],
     overwrite: bool = False,
     allow_schema_migration: bool = False,
+    timestamp_columns: list[str] | None = None,
 ) -> dict:
     """
     Convert records to a PyArrow table and write to the named Iceberg table.
@@ -99,6 +100,12 @@ def append_to_iceberg(
     with the existing Iceberg table schema, drop and recreate the table rather
     than raising. Use this when a schema change is intentional (e.g. a struct
     column has been flattened). Existing data is lost.
+
+    timestamp_columns: list of column names that should be cast to
+    timestamp(us, UTC) after the NDJSON round-trip. PyArrow's JSON reader
+    returns all string-like values as strings regardless of content; this
+    parameter applies an explicit cast so those columns are stored as proper
+    Iceberg timestamps rather than strings.
 
     Returns a summary dict with snapshot info.
     """
@@ -119,6 +126,24 @@ def append_to_iceberg(
     if clean_schema != arrow_table.schema:
         arrow_table = arrow_table.cast(clean_schema)
         print(f"[iceberg] sanitized null-typed fields in schema")
+
+    # Explicitly cast designated columns to timestamp(us, UTC).
+    # PyArrow's JSON reader always returns string columns as strings, so datetime
+    # objects serialised via json.dumps(default=str) come back as strings here.
+    # pandas.to_datetime handles both the '+00:00' and 'Z' ISO 8601 variants.
+    if timestamp_columns:
+        import pandas as pd
+        for col_name in timestamp_columns:
+            if col_name not in arrow_table.schema.names:
+                continue
+            col_idx = arrow_table.schema.get_field_index(col_name)
+            raw_values = arrow_table.column(col_name).to_pylist()
+            ts_array = pa.array(
+                pd.to_datetime(raw_values, utc=True),
+                type=pa.timestamp("us", tz="UTC"),
+            )
+            arrow_table = arrow_table.set_column(col_idx, col_name, ts_array)
+        print(f"[iceberg] cast {timestamp_columns} to timestamp(us, UTC)")
 
     full_name = f"{namespace}.{table_name}"
 

@@ -16,21 +16,31 @@ to unpack. The silver schema maps directly from bronze fields:
   entityType     str   always "ATTRACTION" (queue-times only tracks rides)
   is_open        bool  whether the ride is currently open
   status         str   "OPERATING" or "CLOSED" (derived from is_open)
-  wait_time      int   current standby wait in minutes
-  last_updated   str   ISO 8601 timestamp from the source API
-  ingest_timestamp str  UTC timestamp this batch was ingested
+  wait_time        int            current standby wait in minutes
+  last_updated     timestamp(UTC) when the source API last updated this ride
+  ingest_timestamp timestamp(UTC) when this batch was ingested
 """
 
 from airflow.sdk import Asset, asset
 
 
+def _parse_ts(value: str | None):
+    """Parse an ISO 8601 string (with Z or +00:00) to a timezone-aware datetime."""
+    from datetime import datetime
+    if value is None:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 def _normalize_record(record: dict) -> dict:
     """
-    Pass bronze live-data records through to silver with light type enforcement.
+    Promote bronze live-data records to silver with explicit type enforcement.
 
-    wait_time is explicitly cast to int to prevent PyArrow from inferring
-    null() on all-None batches (which would cause Iceberg schema conflicts
-    on subsequent appends with real values).
+    - wait_time cast to int: prevents PyArrow inferring null() on all-None batches
+      (which causes Iceberg schema conflicts on subsequent appends with real values).
+    - last_updated / ingest_timestamp parsed to datetime: bronze stores these as
+      raw strings; silver should hold proper timestamps. append_to_iceberg() will
+      cast them to timestamp(us, UTC) via the timestamp_columns parameter.
     """
     return {
         "park_id":    record.get("park_id"),
@@ -42,8 +52,8 @@ def _normalize_record(record: dict) -> dict:
         "is_open":    record.get("is_open"),
         "status":     record.get("status"),
         "wait_time":  int(record["wait_time"]) if record.get("wait_time") is not None else None,
-        "last_updated":      record.get("last_updated"),
-        "ingest_timestamp":  record.get("ingest_timestamp"),
+        "last_updated":     _parse_ts(record.get("last_updated")),
+        "ingest_timestamp": _parse_ts(record.get("ingest_timestamp")),
     }
 
 
@@ -70,11 +80,14 @@ def iceberg_live_data(context: dict) -> dict:
     catalog = get_catalog()
     # allow_schema_migration=True drops and recreates the table if the schema has
     # changed (schema evolves from the old queue-struct columns to the new flat shape).
+    # timestamp_columns ensures last_updated and ingest_timestamp are stored as
+    # proper Iceberg timestamps rather than strings after the NDJSON round-trip.
     result = append_to_iceberg(
         catalog,
         namespace="silver",
         table_name="live_data",
         records=records,
         allow_schema_migration=True,
+        timestamp_columns=["last_updated", "ingest_timestamp"],
     )
     return result
