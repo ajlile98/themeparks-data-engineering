@@ -48,8 +48,16 @@ def iceberg_destinations(context: dict) -> dict:
                 })
     print(f"[parks] exploded {len(park_records)} park records from {len(records)} destinations")
 
+    # Strip the nested parks array before writing silver.destinations — that data
+    # is already captured in silver.parks and the nested struct causes query errors
+    # in clients that can't handle array-typed columns.
+    dest_records = [
+        {k: v for k, v in dest.items() if k != "parks"}
+        for dest in records
+    ]
+
     catalog = get_catalog()
-    result = append_to_iceberg(catalog, namespace="silver", table_name="destinations", records=records, overwrite=True, allow_schema_migration=True)
+    result = append_to_iceberg(catalog, namespace="silver", table_name="destinations", records=dest_records, overwrite=True, allow_schema_migration=True)
     parks_result = append_to_iceberg(catalog, namespace="silver", table_name="parks", records=park_records, overwrite=True, allow_schema_migration=True)
     print(f"[parks] {parks_result}")
     return result
