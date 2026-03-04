@@ -157,6 +157,34 @@ def append_to_iceberg(
     if catalog.table_exists(full_name):
         tbl = catalog.load_table(full_name)
         if overwrite:
+            # When allow_schema_migration=True, proactively compare column sets before
+            # attempting the overwrite. tbl.overwrite() succeeds silently even when the
+            # incoming schema has gained or lost columns — it just writes nulls for any
+            # column present in the Iceberg schema but absent from the Arrow table.
+            # Detecting the drift here ensures the table is always recreated with the
+            # correct schema rather than accumulating stale columns.
+            if allow_schema_migration:
+                existing_cols = {field.name for field in tbl.schema().fields}
+                incoming_cols = set(arrow_table.schema.names)
+                if existing_cols != incoming_cols:
+                    print(
+                        f"[iceberg] schema drift on '{full_name}': "
+                        f"added={incoming_cols - existing_cols}, "
+                        f"removed={existing_cols - incoming_cols}\n"
+                        f"[iceberg] allow_schema_migration=True — dropping and recreating table"
+                    )
+                    catalog.drop_table(full_name)
+                    tbl = catalog.create_table(full_name, schema=arrow_table.schema)
+                    tbl.append(arrow_table)
+                    print(f"[iceberg] recreated '{full_name}' and wrote {len(records)} rows")
+                    # Skip the overwrite block below
+                    tbl = catalog.load_table(full_name)
+                    snapshot = tbl.current_snapshot()
+                    return {
+                        "table": full_name,
+                        "snapshot_id": snapshot.snapshot_id if snapshot else None,
+                        "rows_written": len(records),
+                    }
             try:
                 tbl.overwrite(arrow_table)
                 print(f"[iceberg] overwrote '{full_name}' with {len(records)} rows")
